@@ -223,6 +223,34 @@ class Top2Gating(nn.Module):
 
         dispatch_tensor = combine_tensor.bool().to(combine_tensor)
         return dispatch_tensor, combine_tensor, loss
+    
+    def top_router(self, logits, tau, max_k=4):
+        '''
+        NOTE: This is assuming that the experts are in the last dimension
+        Implementation is based on dynamic-k psuedo code/math proof
+        Not sure if this works for dimensions > 1
+            If dimension > 1 and we have a non-uniform distribution of experts being called, do 
+            we need to apply a masking or would each tensor maintain its fixed dimension?
+        TODO:
+        - Integrate with rest of the code (i.e. calling top_router() function)
+        - Testing
+        '''
+        probabilities = torch.softmax(logits, dim=-1)
+        p_sorted, idx_sorted = torch.sort(probabilities, descending=True, dim=-1)
+        cumulative_sum = torch.cumsum(p_sorted, dim=-1)
+
+        k_star = (cumulative_sum < tau).sum(dim=-1) + 1     # How many sums < tau , + 1
+        k_star = torch.clamp(k_star, max=max_k)             # range = [1, max_k]
+        k = k_star.item()                     # Convert to python int
+
+        topk_p = p_sorted[:k]   # slice off the top-k probabilities
+        renormalization = topk_p.sum(dim=-1, keepdim=True)
+        new_p = topk_p / renormalization
+
+        topk_idx = idx_sorted[:k]
+
+        return topk_idx, new_p
+
 
 # plain mixture of experts
 
