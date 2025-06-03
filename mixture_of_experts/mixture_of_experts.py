@@ -224,32 +224,35 @@ class Top2Gating(nn.Module):
         dispatch_tensor = combine_tensor.bool().to(combine_tensor)
         return dispatch_tensor, combine_tensor, loss
     
-    def top_router(self, logits, tau, max_k=4):
-        '''
-        NOTE: This is assuming that the experts are in the last dimension
-        Implementation is based on dynamic-k psuedo code/math proof
-        Not sure if this works for dimensions > 1
-            If dimension > 1 and we have a non-uniform distribution of experts being called, do 
-            we need to apply a masking or would each tensor maintain its fixed dimension?
-        TODO:
-        - Integrate with rest of the code (i.e. calling top_router() function)
-        - Testing
-        '''
+    def top_router(self, logits, tau, max_k=4): 
         probabilities = torch.softmax(logits, dim=-1)
         p_sorted, idx_sorted = torch.sort(probabilities, descending=True, dim=-1)
+
+        
         cumulative_sum = torch.cumsum(p_sorted, dim=-1)
 
-        k_star = (cumulative_sum < tau).sum(dim=-1) + 1     # How many sums < tau , + 1
-        k_star = torch.clamp(k_star, max=max_k)             # range = [1, max_k]
-        k = k_star.item()                     # Convert to python int
+        #we want to create a boolean mask to figure out the true "crossing" point!
+        mask_keep = (cumulative_sum < tau).type(torch.int32)
+        mask_keep[..., 0] = 1 #this ellipsis notation represents all the leading dimensions btw 
+        k_star = mask_keep.sum(dim = -1).clamp(max = max_k)
 
-        topk_p = p_sorted[:k]   # slice off the top-k probabilities
-        renormalization = topk_p.sum(dim=-1, keepdim=True)
-        new_p = topk_p / renormalization
 
-        topk_idx = idx_sorted[:k]
+        #now, we'll need to start building up a matrix up to our max_k value in our function
+        size_range = torch.arange(max_k, device=logits.device)
+        select_the_mask = size_range[None, :].expand(*k_star.shape, max_k)
+        #unsqueeze(-1) adds a size 1 dimension to the end of the tensor btw
+        select_the_mask = select_the_mask < k_star.unsqueeze(-1)
 
-        return topk_idx, new_p
+        #at this point we pad our values as needed, specifically when select_the_mask is False
+        pad_values = torch.full_like(idx_sorted[..., :max_k], -1)
+        select_idx = torch.where(select_the_mask, idx_sorted[..., :max_k], pad_values)
+        select_probs = torch.where(select_the_mask, p_sorted[..., max_k], pad_values, torch.zeros(1, dtype=logits.dtype, device=logits.device))
+
+
+        renormalization = select_probs.sum(dim=-1, keepdim=True).clamp(min = 0.0000001)
+        select_probs = select_probs / renormalization
+
+        return select_idx, select_probs
 
 
 # plain mixture of experts
