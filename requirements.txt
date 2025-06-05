@@ -8,6 +8,7 @@ fsspec==2025.3.2
 hf-xet==1.1.0
 huggingface-hub==0.30.2
 idna==3.10
+iniconfig==2.1.0
 Jinja2==3.1.6
 kiwisolver==1.4.8
 MarkupSafe==3.0.2
@@ -18,8 +19,11 @@ networkx==3.4.2
 numpy==2.2.5
 packaging==25.0
 pillow==11.2.1
+pluggy==1.6.0
 psutil==7.0.0
+Pygments==2.19.1
 pyparsing==3.2.3
+pytest==8.4.0
 python-dateutil==2.9.0.post0
 PyYAML==6.0.2
 regex==2024.11.6
