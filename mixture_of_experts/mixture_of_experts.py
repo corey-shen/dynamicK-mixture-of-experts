@@ -228,14 +228,12 @@ class Top2Gating(nn.Module):
         probabilities = torch.softmax(logits, dim=-1)
         p_sorted, idx_sorted = torch.sort(probabilities, descending=True, dim=-1)
 
-        
         cumulative_sum = torch.cumsum(p_sorted, dim=-1)
 
         #we want to create a boolean mask to figure out the true "crossing" point!
         mask_keep = (cumulative_sum < tau).type(torch.int32)
         mask_keep[..., 0] = 1 #this ellipsis notation represents all the leading dimensions btw 
         k_star = mask_keep.sum(dim = -1).clamp(max = max_k)
-
 
         #now, we'll need to start building up a matrix up to our max_k value in our function
         size_range = torch.arange(max_k, device=logits.device)
@@ -246,8 +244,13 @@ class Top2Gating(nn.Module):
         #at this point we pad our values as needed, specifically when select_the_mask is False
         pad_values = torch.full_like(idx_sorted[..., :max_k], -1)
         select_idx = torch.where(select_the_mask, idx_sorted[..., :max_k], pad_values)
-        select_probs = torch.where(select_the_mask, p_sorted[..., max_k], pad_values, torch.zeros(1, dtype=logits.dtype, device=logits.device))
-
+        # select_probs = torch.where(select_the_mask, p_sorted[..., max_k], torch.zeros(1, dtype=logits.dtype, device=logits.device))
+        '''
+        The line above only selects the single probability at index max_k, not the first max_k probability
+        '''
+        topk_all_probs = p_sorted[..., :max_k]                     # shape [..., max_k] | Creates a tensor of the top max_k probabilities
+        pad_probs = torch.zeros_like(topk_all_probs)              # shape [..., max_k]  | Create a tensor of zeros (same shape)
+        select_probs = torch.where(select_the_mask, topk_all_probs, pad_probs)  # Apply mask - keep topk where True, pad where False
 
         renormalization = select_probs.sum(dim=-1, keepdim=True).clamp(min = 0.0000001)
         select_probs = select_probs / renormalization
