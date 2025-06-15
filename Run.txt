@@ -1,0 +1,9 @@
+python benchmark_metrics/benchmark_full_wikitext103.py \
+  --model_path "<MODEL_PATH>" \
+  --seq_len 32 \
+  --max_new_tokens 32 \
+  --batch_size 1 \
+  --runs 50 \
+  --prompt "Explain the concept of Mixture of Experts." \
+  --val_file wikitext103_validation.txt \
+  --top_k 5
