@@ -1,1 +1,3 @@
-from mixture_of_experts.mixture_of_experts import MoE, HeirarchicalMoE, Experts
+from .mixture_of_experts import Top2Gating, MoE, HeirarchicalMoE, Experts
+
+__all__ = ['Top2Gating', 'MoE', 'HeirarchicalMoE', 'Experts']
