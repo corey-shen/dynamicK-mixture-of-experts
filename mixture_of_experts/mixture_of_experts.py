@@ -1,12 +1,16 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-
+from transformers import GPT2Tokenizer
+from datasets import load_dataset
+from torch.utils.data import DataLoader
+import time
+from tqdm import tqdm
 import math
 from inspect import isfunction
+import os
 
 # constants
-
 MIN_EXPERT_CAPACITY = 4
 
 # helper functions
@@ -646,6 +650,142 @@ def debug_top_router():
         crossing = (cumsum >= tau).float().argmax(dim=-1)
         print(f"  Crossing point: {crossing[0, 0].item()}")
 
+class SimpleTransformerLayer(nn.Module):
+    def __init__(self, d_model, nhead=8, use_moe=True, moe_config=None):
+        super().__init__()
+        self.attention = nn.MultiheadAttention(d_model, nhead, batch_first=True)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        
+        if use_moe:
+            self.ffn = DynamicMoE(**moe_config)
+            self.use_moe = True
+        else:
+            self.ffn = nn.Sequential(
+                nn.Linear(d_model, d_model * 4),
+                nn.GELU(),
+                nn.Linear(d_model * 4, d_model)
+            )
+            self.use_moe = False
+    
+    def forward(self, x):
+        # Self-attention
+        attn_out, _ = self.attention(x, x, x)
+        x = self.norm1(x + attn_out)
+        
+        # Feedforward
+        if self.use_moe:
+            ffn_out, moe_loss = self.ffn(x)
+            x = self.norm2(x + ffn_out)
+            return x, moe_loss
+        else:
+            ffn_out = self.ffn(x)
+            x = self.norm2(x + ffn_out)
+            return x, torch.tensor(0.0, device=x.device)
+
+class SimpleLM(nn.Module):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=4, max_seq_len=512, moe_config=None):
+        super().__init__()
+        self.d_model = d_model
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        self.pos_embedding = nn.Parameter(torch.randn(max_seq_len, d_model))
+        
+        # Create layers (only middle layers use MoE)
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            use_moe = (i in [1, 2]) if num_layers >= 4 else (i == 1)  # Middle layers
+            layer_moe_config = moe_config if use_moe else None
+            self.layers.append(SimpleTransformerLayer(d_model, nhead, use_moe, layer_moe_config))
+        
+        self.norm = nn.LayerNorm(d_model)
+        self.lm_head = nn.Linear(d_model, vocab_size)
+    
+    def forward(self, input_ids):
+        seq_len = input_ids.size(1)
+        
+        # Embeddings
+        x = self.embedding(input_ids) * math.sqrt(self.d_model)
+        x = x + self.pos_embedding[:seq_len]
+        
+        # Transformer layers
+        total_moe_loss = 0
+        for layer in self.layers:
+            x, moe_loss = layer(x)
+            total_moe_loss = total_moe_loss + moe_loss
+        
+        x = self.norm(x)
+        logits = self.lm_head(x)
+        
+        return logits, total_moe_loss
+
+def load_wikitext(tokenizer, max_length=256, split='test'):
+    """Load WikiText-103 from local Kaggle file"""
+    
+    # Map splits to actual file paths
+    file_mapping = {
+        'test': "../dataset/wiki.test.tokens",
+        'train': "../dataset/wiki.train.tokens", 
+        'validation': "../dataset/wiki.valid.tokens"
+    }
+    
+    file_path = file_mapping.get(split, "../dataset/wiki.valid.tokens")
+    
+    # Read the file
+    with open(file_path, 'r', encoding='utf-8') as f:
+        lines = [line.strip() for line in f.readlines() if line.strip()]
+    
+    # Join all lines into one text
+    all_text = ' '.join(lines)
+    
+    if not all_text.strip():
+        return []
+    
+    # Tokenize the entire text
+    tokens = tokenizer(all_text, truncation=False, return_tensors="pt")['input_ids'][0]
+    
+    # Split into chunks of max_length
+    chunks = []
+    for i in range(0, len(tokens) - max_length, max_length):
+        chunk = tokens[i:i + max_length]
+        if len(chunk) == max_length:
+            chunks.append({'input_ids': chunk})
+    
+    print(f"Created {len(chunks)} chunks from local file")
+    return chunks[:1000]  # Limit for speed
+
+def calculate_perplexity(model, data, device):
+    """Calculate perplexity using forward passes only"""
+    model.eval()
+    total_loss = 0
+    total_tokens = 0
+    
+    with torch.no_grad():
+        for item in tqdm(data):
+            input_ids = item['input_ids'].unsqueeze(0).to(device)  # Add batch dim
+            
+            # Forward pass
+            logits, moe_loss = model(input_ids)
+            
+            # Shift for next-token prediction
+            shift_logits = logits[..., :-1, :].contiguous()  # All except last position
+            shift_labels = input_ids[..., 1:].contiguous()   # All except first position
+            
+            # Calculate cross-entropy loss
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)), 
+                shift_labels.view(-1), 
+                reduction='sum'
+            )
+            
+            total_loss += loss.item()
+            total_tokens += shift_labels.numel()
+    
+    avg_loss = total_loss / total_tokens
+    perplexity = math.exp(avg_loss)
+    return perplexity, avg_loss
+
+# Add a function for testing perplexity score? | def test_perplexity():
+
 if __name__ == "__main__":
     '''
     NOTE: Replaced top-2 expert selection with self.top_router() instead of top1(raw_gates)
@@ -653,3 +793,4 @@ if __name__ == "__main__":
     #test_current_code()
     run_all_tests()
     debug_top_router()
+    # test_perplexity()
