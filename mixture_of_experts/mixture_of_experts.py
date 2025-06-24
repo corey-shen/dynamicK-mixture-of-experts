@@ -664,7 +664,8 @@ class SimpleTransformerLayer(nn.Module):
             self.ffn = nn.Sequential(
                 nn.Linear(d_model, d_model * 4),
                 nn.GELU(),
-                nn.Linear(d_model * 4, d_model)
+                nn.Linear(d_model * 4, d_model),
+                torch.nn.SELU()
             )
             self.use_moe = False
     
@@ -717,74 +718,6 @@ class SimpleLM(nn.Module):
         logits = self.lm_head(x)
         
         return logits, total_moe_loss
-
-def load_wikitext(tokenizer, max_length=256, split='test'):
-    """Load WikiText-103 from local Kaggle file"""
-    
-    # Map splits to actual file paths
-    file_mapping = {
-        'test': "../dataset/wiki.test.tokens",
-        'train': "../dataset/wiki.train.tokens", 
-        'validation': "../dataset/wiki.valid.tokens"
-    }
-    
-    file_path = file_mapping.get(split, "../dataset/wiki.valid.tokens")
-    
-    # Read the file
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = [line.strip() for line in f.readlines() if line.strip()]
-    
-    # Join all lines into one text
-    all_text = ' '.join(lines)
-    
-    if not all_text.strip():
-        return []
-    
-    # Tokenize the entire text
-    tokens = tokenizer(all_text, truncation=False, return_tensors="pt")['input_ids'][0]
-    
-    # Split into chunks of max_length
-    chunks = []
-    for i in range(0, len(tokens) - max_length, max_length):
-        chunk = tokens[i:i + max_length]
-        if len(chunk) == max_length:
-            chunks.append({'input_ids': chunk})
-    
-    print(f"Created {len(chunks)} chunks from local file")
-    return chunks[:1000]  # Limit for speed
-
-def calculate_perplexity(model, data, device):
-    """Calculate perplexity using forward passes only"""
-    model.eval()
-    total_loss = 0
-    total_tokens = 0
-    
-    with torch.no_grad():
-        for item in tqdm(data):
-            input_ids = item['input_ids'].unsqueeze(0).to(device)  # Add batch dim
-            
-            # Forward pass
-            logits, moe_loss = model(input_ids)
-            
-            # Shift for next-token prediction
-            shift_logits = logits[..., :-1, :].contiguous()  # All except last position
-            shift_labels = input_ids[..., 1:].contiguous()   # All except first position
-            
-            # Calculate cross-entropy loss
-            loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)), 
-                shift_labels.view(-1), 
-                reduction='sum'
-            )
-            
-            total_loss += loss.item()
-            total_tokens += shift_labels.numel()
-    
-    avg_loss = total_loss / total_tokens
-    perplexity = math.exp(avg_loss)
-    return perplexity, avg_loss
-
-# Add a function for testing perplexity score? | def test_perplexity():
 
 if __name__ == "__main__":
     '''
