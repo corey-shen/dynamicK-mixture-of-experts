@@ -9,10 +9,9 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4): # optimize/load 
     data_set = load_dataset("wikitext", "wikitext-103-raw-v1", split=split)
 
     # tokenizes the sample, turning raw strings into input token IDs.
+    tokenizer=AutoTokenizer.from_pretrained("Qwen/Qwen3-4B")
     def tokenize(sample):
-        tokenizer=AutoTokenizer.from_pretrained("Qwen/Qwen3-4B")
         print(tokenizer)
-        # print(sample["text"])
         # print(tokenizer(sample["text"]))
         ids = tokenizer(sample["text"]).input_ids
         # you can drop empty lines
