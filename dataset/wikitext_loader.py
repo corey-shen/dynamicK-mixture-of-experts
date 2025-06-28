@@ -9,6 +9,7 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4, tokenizer=AutoTok
 
     # tokenizes the sample, turning raw strings into input token IDs.
     def tokenize(sample):
+        tokenizer=AutoTokenizer.from_pretrained("Qwen/Qwen3-4B")
         print(tokenizer)
         # print(sample["text"])
         # print(tokenizer(sample["text"]))
