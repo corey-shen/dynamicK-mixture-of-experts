@@ -1,8 +1,9 @@
 from datasets import load_dataset
 from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
 # keep in mind that split can be “train” or “validation” or “test”, and the seq_len is the model context length
-def get_wikitext103(split="train", seq_len=1024, batch_size=4, tokenizer=None): # optimize/load balancing seq_len via number of heads running
+def get_wikitext103(split="train", seq_len=1024, batch_size=4, tokenizer=AutoTokenizer.from_pretrained("Qwen/Qwen3-4B")): # optimize/load balancing seq_len via number of heads running
 
     data_set = load_dataset("wikitext", "wikitext-103-raw-v1", split=split)
 
@@ -26,3 +27,4 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4, tokenizer=None): 
 
     # DataLoader that yields dict(input_ids, attention_mask) batches.
     return DataLoader(windows, batch_size=batch_size, shuffle=(split == "train"))
+get_wikitext103("train", 1024, 4, None)
