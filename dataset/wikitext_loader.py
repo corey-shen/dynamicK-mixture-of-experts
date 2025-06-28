@@ -32,4 +32,4 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4): # optimize/load 
 
     # DataLoader that yields dict(input_ids, attention_mask) batches.
     return DataLoader(windows, batch_size=batch_size, shuffle=(split == "train"))
-get_wikitext103("train", 1024, 4, None)
+get_wikitext103("train", 1024, 4)
