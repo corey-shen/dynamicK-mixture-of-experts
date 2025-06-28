@@ -9,6 +9,7 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4, tokenizer=AutoTok
 
     # tokenizes the sample, turning raw strings into input token IDs.
     def tokenize(sample):
+        print(tokenizer(sample["text"]))
         ids = tokenizer(sample["text"]).input_ids
         # you can drop empty lines
         return {"ids": [i for i in ids if i]}
