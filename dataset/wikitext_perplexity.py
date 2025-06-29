@@ -3,7 +3,7 @@ from mixture_of_experts.mixture_of_experts import testClass
 from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
 
-model_id  = "meta-llama/Llama-3.2-1B"
+model_id  = "Qwen/Qwen3-4B"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = testClass.load_pretrained(model_id).cuda().eval()
 
