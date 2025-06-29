@@ -17,7 +17,7 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4): # optimize/load 
         # you can drop empty lines
         return {"ids": [i for i in ids if i]}
 
-    tokenized = data_set.map(tokenize, batched=True, remove_columns=["text"])
+    tokenized = data_set.map(tokenize, batched=False, remove_columns=["text"])
 
     # this is where you chunk everything into fixed windows
     def chunk(example):
