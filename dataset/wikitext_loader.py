@@ -25,8 +25,8 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4): # optimize/load 
         all_the_ids = sum(example["ids"], [])
         out = [all_the_ids[i : i + seq_len]       # sliding windows
                for i in range(0, len(all_the_ids) - seq_len, seq_len)]
-        print(f"All the IDs: {all_the_ids}")
-        print(f"Out: {out}")
+        # print(f"All the IDs: {all_the_ids}")
+        # print(f"Out: {out}")
         return {"input_ids": out}
 
     windows = tokenized.map(chunk, batched=True, remove_columns=["ids"])
