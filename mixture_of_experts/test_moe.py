@@ -1,5 +1,5 @@
 import torch
-from MoE import DynamicMoE, MoE
+from mixture_of_experts import DynamicMoE, MoE
 
 def test_dynamic_moe():
     # Same code as mixture_of_experts.py

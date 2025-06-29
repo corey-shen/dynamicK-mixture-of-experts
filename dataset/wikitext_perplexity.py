@@ -1,5 +1,5 @@
 import torch, math
-from MoE.mixture_of_experts import test_tau_sensitivity
+from mixture_of_experts.mixture_of_experts import test_tau_sensitivity
 from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
 
