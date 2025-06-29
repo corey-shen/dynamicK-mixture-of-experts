@@ -21,14 +21,15 @@ def get_wikitext103(split="train", seq_len=1024, batch_size=4): # optimize/load 
 
     # this is where you chunk everything into fixed windows
     def chunk(example):
-        ids = example["ids"]
-        out = [ids[i : i + seq_len]       # sliding windows
-               for i in range(0, len(ids) - seq_len, seq_len)]
-        print(f"IDS: {ids}")
+        # ids = example["ids"]
+        all_the_ids = sum(example["ids"], [])
+        out = [all_the_ids[i : i + seq_len]       # sliding windows
+               for i in range(0, len(all_the_ids) - seq_len, seq_len)]
+        print(f"All the IDs: {all_the_ids}")
         print(f"Out: {out}")
         return {"input_ids": out}
 
-    windows = tokenized.map(chunk, batched=False, remove_columns=["ids"])
+    windows = tokenized.map(chunk, batched=True, remove_columns=["ids"])
     windows.set_format(type="torch")
 
     # DataLoader that yields dict(input_ids, attention_mask) batches.
