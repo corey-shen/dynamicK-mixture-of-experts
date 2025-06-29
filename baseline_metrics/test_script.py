@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from MoE import MoE
+from mixture_of_experts import MoE
 
 print("Defining custom Experts class...")
 # a 3 layered MLP as the experts
