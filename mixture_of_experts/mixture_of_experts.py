@@ -262,7 +262,23 @@ class DynamicMoE(nn.Module):
 
         output = torch.einsum('ebcd,bnec->bnd', expert_outputs, combine_tensor)
         return output, loss * self.loss_coef
-
+    
+    def load_pretrained(cls, map_location='cpu'):
+        """
+        Loads a pretrained DynamicMoE model from a checkpoint.
+        Assumes the checkpoint was saved using:
+            torch.save({
+                'model_args': {...},
+                'state_dict': model.state_dict()
+            }, path)
+        """
+        checkpoint = torch.load("wikitext_loader.py", map_location=map_location)
+        # Extract model constructor arguments
+        model_args = checkpoint.get("model_args", {})
+        model = cls(**model_args)
+        # Load the weights
+        model.load_state_dict(checkpoint["state_dict"])
+        return model
 
 # plain mixture of experts
 
@@ -723,11 +739,10 @@ class SimpleLM(nn.Module):
         
         return logits, total_moe_loss
 
-
 def main():
     model_id  = "Qwen/Qwen3-4B"
     tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = DynamicMoE.load_pretrained(model_id).cuda().eval()
+    model = DynamicMoE.forward()
 
     dl = get_wikitext103("test", seq_len=1024, batch_size=4, tokenizer=tokenizer)
 
@@ -746,6 +761,21 @@ def main():
 
     perplexity = math.exp(total_loss / n_tokens)
     print(f"Perplexity Score on WikiText-103: {perplexity:8.2f}")
+
+    torch.save({
+        'model_args': {
+            'dim': 512,
+            'num_experts': 16,
+            'hidden_dim': 2048,
+            'activation': nn.ReLU,
+            'capacity_factor_train': 1.25,
+            'capacity_factor_eval': 2.0,
+            'loss_coef': 1e-2,
+            'tau': 0.95,
+            'max_k': 4,
+        },
+        'state_dict': model.state_dict()
+    }, 'dynamicmoe.pt')
 
 if __name__ == "__main__":
     '''
