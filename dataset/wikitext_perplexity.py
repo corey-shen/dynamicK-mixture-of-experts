@@ -1,11 +1,11 @@
 import torch, math
-from mixture_of_experts.mixture_of_experts import SimpleLM
+from mixture_of_experts.mixture_of_experts import DynamicKGating
 from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
 
 model_id  = "meta-llama/Llama-3.2-1B"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = SimpleLM.load_pretrained(model_id).cuda().eval()
+model = DynamicKGating.load_pretrained(model_id).cuda().eval()
 
 dl = get_wikitext103("test", seq_len=1024, batch_size=4, tokenizer=tokenizer)
 
