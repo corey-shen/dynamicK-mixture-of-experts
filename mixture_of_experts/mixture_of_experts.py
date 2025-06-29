@@ -727,3 +727,6 @@ if __name__ == "__main__":
     run_all_tests()
     debug_top_router()
     # test_perplexity()
+
+class testClass():
+    print("hello world")
