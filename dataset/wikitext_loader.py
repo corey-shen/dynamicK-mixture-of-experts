@@ -4,7 +4,7 @@ from transformers import AutoTokenizer
 import torch
 
 # keep in mind that split can be “train” or “validation” or “test”, and the seq_len is the model context length
-def get_wikitext103(split="test", seq_len=1024, batch_size=4): # optimize/load balancing seq_len via number of heads running
+def get_wikitext103(split="validation", seq_len=1024, batch_size=4): # optimize/load balancing seq_len via number of heads running
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     data_set = load_dataset("wikitext", "wikitext-103-raw-v1", split=split)
 
