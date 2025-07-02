@@ -175,16 +175,18 @@ class DynamicKGating(nn.Module):
         return select_idx, select_probs
 
 class DynamicMoE(nn.Module):
+    print("Reaches DynamicMoE class")
     def __init__(self,
         dim,
         num_experts = 16,
         hidden_dim = None,
-        activation = nn.ReLU,   # Change to GELU?
+        activation = nn.GELU,   # Change to GELU?
         capacity_factor_train = 1.25,
         capacity_factor_eval = 2.,
         loss_coef = 1e-2,
         tau = 0.95,
         max_k = 4):
+        print("reaches DynamicMoE __init__")
         super().__init__()
 
         self.num_experts = num_experts
@@ -203,6 +205,7 @@ class DynamicMoE(nn.Module):
         self.loss_coef = loss_coef
 
     def forward(self, inputs, **kwargs):
+        print("reaches def forward()")
         b, n, d, e = *inputs.shape, self.num_experts
         dispatch_tensor, combine_tensor, loss = self.gate(inputs)
         expert_inputs = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_tensor)
@@ -225,6 +228,7 @@ class DynamicMoE(nn.Module):
                 'state_dict': model.state_dict()
             }, path)
         """
+        print("Reaches load_pretrained")
         checkpoint = torch.load("wikitext_loader.py", map_location=map_location)  # add torch.save()
         # Extract model constructor arguments
         model_args = checkpoint.get("model_args", {})
@@ -233,11 +237,12 @@ class DynamicMoE(nn.Module):
         model.load_state_dict(checkpoint["state_dict"])
         return model
 
-def main():
+if __name__ == "__main__":
+    print("reaches top of __main__")
     model_id  = "Qwen/Qwen3-4B"
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     model = DynamicMoE.forward()
-
+    print("Reaches __name__==__main__")
     dl = get_wikitext103("test", seq_len=1024, batch_size=4, tokenizer=tokenizer)
 
     total_loss, n_tokens = 0.0, 0
@@ -270,13 +275,3 @@ def main():
         },
         'state_dict': model.state_dict()
     }, 'checkpoint/dynamicmoe.pt')
-
-if __name__ == "__main__":
-    '''
-    NOTE: Replaced top-2 expert selection with self.top_router() instead of top1(raw_gates)
-    '''
-    main()
-    #test_current_code()
-    # run_all_tests()
-    # debug_top_router()
-    # test_perplexity()

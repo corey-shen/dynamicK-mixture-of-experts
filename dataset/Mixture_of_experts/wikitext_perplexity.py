@@ -1,19 +1,25 @@
 import torch, math
-from Mixture_of_experts.mixture_of_experts import DynamicMoE
-from wikitext_loader import get_wikitext103
+print("ABHAHAFHFHFHA")
+from mixture_of_experts import DynamicMoE
+print("XXXXXX")
+# from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
+print("YYYYYYYY")
+from datasets import load_from_disk
+print("ZZZZZZZZZ")
 
 model_id  = "Qwen/Qwen3-4B"
-tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+tokenizer = load_from_disk("tokenized_wikitext103")
 model = DynamicMoE.load_pretrained(model_id).cuda().eval()
 
-dl = get_wikitext103("train", seq_len=1024, batch_size=4, tokenizer=tokenizer)
+# dl = get_wikitext103("train", seq_len=1024, batch_size=4, tokenizer=tokenizer)
 
 total_loss, n_tokens = 0.0, 0
 ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
 
 with torch.no_grad():
-    for batch in dl:
+    for batch in tokenizer:
         ids = batch["input_ids"].cuda()
         labels = ids.clone()
         logits = model(ids).logits          # (b, t, vocab)
