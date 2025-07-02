@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import math
 from inspect import isfunction
-# from mixture_of_experts.mixture_of_experts import testClass
 from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
 
@@ -39,8 +38,8 @@ class Experts(nn.Module):
         hidden_dim = default(hidden_dim, dim * 4)
         num_experts = cast_tuple(num_experts)
 
-        w1 = torch.zeros(*num_experts, dim, hidden_dim)
-        w2 = torch.zeros(*num_experts, hidden_dim, dim)
+        w1 = torch.zeros(*num_experts, dim, hidden_dim)     # raw weight tensors
+        w2 = torch.zeros(*num_experts, hidden_dim, dim)     
 
         w1 = init_(w1)
         w2 = init_(w2)
@@ -50,9 +49,9 @@ class Experts(nn.Module):
         self.act = activation()
 
     def forward(self, x):
-        hidden = torch.einsum('...nd,...dh->...nh', x, self.w1)
+        hidden = torch.einsum('...nd,...dh->...nh', x, self.w1)    # Get each token's hidden representation/expert
         hidden = self.act(hidden)
-        out    = torch.einsum('...nh,...hd->...nd', hidden, self.w2)
+        out    = torch.einsum('...nh,...hd->...nd', hidden, self.w2)    # Project back to the original embedded size
         return out
 
 # the below code is almost all transcribed from the official tensorflow version, from which the papers are written
@@ -136,7 +135,7 @@ class DynamicKGating(nn.Module):
         if expert_usage.sum() > 0:
             # Variance of expert usage
             mean_usage = expert_usage.float().mean()
-            loss = ((expert_usage.float() - mean_usage) ** 2).mean() / (mean_usage + 1e-8)
+            loss = ((expert_usage.float() - mean_usage) ** 2).mean() / (mean_usage + 1e-8) # formula for variance
         else:
             loss = torch.tensor(0.0, device=x.device)
         
@@ -217,7 +216,7 @@ class DynamicMoE(nn.Module):
         output = torch.einsum('ebcd,bnec->bnd', expert_outputs, combine_tensor)
         return output, loss * self.loss_coef
     
-    def load_pretrained(cls, map_location='cpu'):
+    def load_pretrained(cls, map_location='cpu'):   # currently a skeleton, clean up
         """
         Loads a pretrained DynamicMoE model from a checkpoint.
         Assumes the checkpoint was saved using:
@@ -226,82 +225,13 @@ class DynamicMoE(nn.Module):
                 'state_dict': model.state_dict()
             }, path)
         """
-        checkpoint = torch.load("wikitext_loader.py", map_location=map_location)
+        checkpoint = torch.load("wikitext_loader.py", map_location=map_location)  # add torch.save()
         # Extract model constructor arguments
         model_args = checkpoint.get("model_args", {})
         model = cls(**model_args)
         # Load the weights
         model.load_state_dict(checkpoint["state_dict"])
         return model
-
-class SimpleTransformerLayer(nn.Module):
-    def __init__(self, d_model, nhead=8, use_moe=True, moe_config=None):
-        super().__init__()
-        self.attention = nn.MultiheadAttention(d_model, nhead, batch_first=True)
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-        
-        if use_moe:
-            self.ffn = DynamicMoE(**moe_config)
-            self.use_moe = True
-        else:
-            self.ffn = nn.Sequential(
-                nn.Linear(d_model, d_model * 4),
-                nn.GELU(),
-                nn.Linear(d_model * 4, d_model),
-                torch.nn.SELU()
-            )
-            self.use_moe = False
-    
-    def forward(self, x):
-        # Self-attention
-        attn_out, _ = self.attention(x, x, x)
-        x = self.norm1(x + attn_out)
-        
-        # Feedforward
-        if self.use_moe:
-            ffn_out, moe_loss = self.ffn(x)
-            x = self.norm2(x + ffn_out)
-            return x, moe_loss
-        else:
-            ffn_out = self.ffn(x)
-            x = self.norm2(x + ffn_out)
-            return x, torch.tensor(0.0, device=x.device)
-
-class SimpleLM(nn.Module):
-    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=4, max_seq_len=512, moe_config=None):
-        super().__init__()
-        self.d_model = d_model
-        self.embedding = nn.Embedding(vocab_size, d_model)
-        self.pos_embedding = nn.Parameter(torch.randn(max_seq_len, d_model))
-        
-        # Create layers (only middle layers use MoE)
-        self.layers = nn.ModuleList()
-        for i in range(num_layers):
-            use_moe = (i in [1, 2]) if num_layers >= 4 else (i == 1)  # Middle layers
-            layer_moe_config = moe_config if use_moe else None
-            self.layers.append(SimpleTransformerLayer(d_model, nhead, use_moe, layer_moe_config))
-        
-        self.norm = nn.LayerNorm(d_model)
-        self.lm_head = nn.Linear(d_model, vocab_size)
-    
-    def forward(self, input_ids):
-        seq_len = input_ids.size(1)
-        
-        # Embeddings
-        x = self.embedding(input_ids) * math.sqrt(self.d_model)
-        x = x + self.pos_embedding[:seq_len]
-        
-        # Transformer layers
-        total_moe_loss = 0
-        for layer in self.layers:
-            x, moe_loss = layer(x)
-            total_moe_loss = total_moe_loss + moe_loss
-        
-        x = self.norm(x)
-        logits = self.lm_head(x)
-        
-        return logits, total_moe_loss
 
 def main():
     model_id  = "Qwen/Qwen3-4B"
@@ -326,12 +256,12 @@ def main():
     perplexity = math.exp(total_loss / n_tokens)
     print(f"Perplexity Score on WikiText-103: {perplexity:8.2f}")
 
-    torch.save({
+    torch.save({    # CHANGE PER MODEL
         'model_args': {
             'dim': 512,
             'num_experts': 16,
             'hidden_dim': 2048,
-            'activation': nn.ReLU,
+            'activation': nn.GELU,
             'capacity_factor_train': 1.25,
             'capacity_factor_eval': 2.0,
             'loss_coef': 1e-2,
@@ -339,7 +269,7 @@ def main():
             'max_k': 4,
         },
         'state_dict': model.state_dict()
-    }, 'dynamicmoe.pt')
+    }, 'checkpoint/dynamicmoe.pt')
 
 if __name__ == "__main__":
     '''
