@@ -6,7 +6,6 @@ import torch
 # keep in mind that split can be “train” or “validation” or “test”, and the seq_len is the model context length
 def get_wikitext103(split, seq_len, batch_size): # optimize/load balancing seq_len via number of heads running
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print("HEllo")
     data_set = load_dataset("wikitext", "wikitext-103-v1", split=split)
 
     # tokenizes the sample, turning raw strings into input token IDs.
@@ -36,4 +35,6 @@ def get_wikitext103(split, seq_len, batch_size): # optimize/load balancing seq_l
 
     # DataLoader that yields dict(input_ids, attention_mask) batches.
     return DataLoader(windows, batch_size=batch_size, shuffle=(split == "train"))
-get_wikitext103("train", 1024, 4)
+
+if __name__ == "__main__":
+    get_wikitext103("train", 1024, 4)

@@ -4,6 +4,8 @@ import math
 from inspect import isfunction
 from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
+from datasets import load_from_disk
+from torch.utils.data import DataLoader
 
 MIN_EXPERT_CAPACITY = 4
 
@@ -173,105 +175,27 @@ class DynamicKGating(nn.Module):
         select_probs = select_probs / renormalization
 
         return select_idx, select_probs
-
-class DynamicMoE(nn.Module):
-    print("Reaches DynamicMoE class")
-    def __init__(self,
-        dim,
-        num_experts = 16,
-        hidden_dim = None,
-        activation = nn.GELU,   # Change to GELU?
-        capacity_factor_train = 1.25,
-        capacity_factor_eval = 2.,
-        loss_coef = 1e-2,
-        tau = 0.95,
-        max_k = 4):
-        print("reaches DynamicMoE __init__")
-        super().__init__()
-
-        self.num_experts = num_experts
-
-        # Use the new Dynamic-K Gating
-        self.gate = DynamicKGating(
-            dim, 
-            num_gates=num_experts, 
-            capacity_factor_train=capacity_factor_train,
-            capacity_factor_eval=capacity_factor_eval,
-            tau=tau,
-            max_k=max_k
-        )
-        
-        self.experts = Experts(dim, num_experts = num_experts, hidden_dim = hidden_dim, activation = activation)
-        self.loss_coef = loss_coef
-
-    def forward(self, inputs, **kwargs):
-        print("reaches def forward()")
-        b, n, d, e = *inputs.shape, self.num_experts
-        dispatch_tensor, combine_tensor, loss = self.gate(inputs)
-        expert_inputs = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_tensor)
-
-        # Now feed the expert inputs through the experts.
-        orig_shape = expert_inputs.shape
-        expert_inputs = expert_inputs.reshape(e, -1, d)
-        expert_outputs = self.experts(expert_inputs)
-        expert_outputs = expert_outputs.reshape(*orig_shape)
-
-        output = torch.einsum('ebcd,bnec->bnd', expert_outputs, combine_tensor)
-        return output, loss * self.loss_coef
     
-    def load_pretrained(cls, map_location='cpu'):   # currently a skeleton, clean up
-        """
-        Loads a pretrained DynamicMoE model from a checkpoint.
-        Assumes the checkpoint was saved using:
-            torch.save({
-                'model_args': {...},
-                'state_dict': model.state_dict()
-            }, path)
-        """
-        print("Reaches load_pretrained")
-        checkpoint = torch.load("wikitext_loader.py", map_location=map_location)  # add torch.save()
-        # Extract model constructor arguments
-        model_args = checkpoint.get("model_args", {})
-        model = cls(**model_args)
-        # Load the weights
-        model.load_state_dict(checkpoint["state_dict"])
-        return model
+def load_pretrained(cls, map_location='cpu'):  
+    """
+    Loads a pretrained DynamicMoE model from a checkpoint.
+    Assumes the checkpoint was saved using:
+        torch.save({
+            'model_args': {...},
+            'state_dict': model.state_dict()
+        }, path)
+    """
+    dataset_path = "tokenized_wikitext103"
+    dataset = load_from_disk(dataset_path)
+    dataloader = DataLoader(dataset, batch_size=4)
+    # checkpoint = torch.load("tokenized_wikitext103", map_location=map_location)  # add torch.save()
+    # Extract model constructor arguments
+    # model_args = checkpoint.get("model_args", {})
+    # model = cls(**model_args)
+    # # Load the weights
+    # model.load_state_dict(checkpoint["state_dict"])
+    # return model
+    return dataloader
 
 if __name__ == "__main__":
-    print("reaches top of __main__")
-    model_id  = "Qwen/Qwen3-4B"
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
-    model = DynamicMoE.forward()
-    print("Reaches __name__==__main__")
-    dl = get_wikitext103("test", seq_len=1024, batch_size=4, tokenizer=tokenizer)
-
-    total_loss, n_tokens = 0.0, 0
-    ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
-
-    with torch.no_grad():
-        for batch in dl:
-            ids = batch["input_ids"].cuda()
-            labels = ids.clone()
-            logits = model(ids).logits          # (b, t, vocab)
-            loss   = ce(logits[:, :-1].reshape(-1, logits.size(-1)),
-                        labels[:, 1:].reshape(-1))
-            total_loss += loss.item()
-            n_tokens   += ids[:, 1:].numel()
-
-    perplexity = math.exp(total_loss / n_tokens)
-    print(f"Perplexity Score on WikiText-103: {perplexity:8.2f}")
-
-    torch.save({    # CHANGE PER MODEL
-        'model_args': {
-            'dim': 512,
-            'num_experts': 16,
-            'hidden_dim': 2048,
-            'activation': nn.GELU,
-            'capacity_factor_train': 1.25,
-            'capacity_factor_eval': 2.0,
-            'loss_coef': 1e-2,
-            'tau': 0.95,
-            'max_k': 4,
-        },
-        'state_dict': model.state_dict()
-    }, 'checkpoint/dynamicmoe.pt')
+    print("hello")
