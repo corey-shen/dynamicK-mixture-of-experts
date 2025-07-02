@@ -1,13 +1,13 @@
 import torch, math
-from mixture_of_experts.mixture_of_experts import testClass
+from Mixture_of_experts.mixture_of_experts import DynamicMoE
 from wikitext_loader import get_wikitext103
 from transformers import AutoTokenizer
 
 model_id  = "Qwen/Qwen3-4B"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = testClass.load_pretrained(model_id).cuda().eval()
+model = DynamicMoE.load_pretrained(model_id).cuda().eval()
 
-dl = get_wikitext103("test", seq_len=1024, batch_size=4, tokenizer=tokenizer)
+dl = get_wikitext103("train", seq_len=1024, batch_size=4, tokenizer=tokenizer)
 
 total_loss, n_tokens = 0.0, 0
 ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
