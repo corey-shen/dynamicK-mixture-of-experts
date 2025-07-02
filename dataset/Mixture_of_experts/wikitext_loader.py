@@ -4,9 +4,10 @@ from transformers import AutoTokenizer
 import torch
 
 # keep in mind that split can be “train” or “validation” or “test”, and the seq_len is the model context length
-def get_wikitext103(split="validation", seq_len=1024, batch_size=4): # optimize/load balancing seq_len via number of heads running
+def get_wikitext103(split, seq_len, batch_size): # optimize/load balancing seq_len via number of heads running
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    data_set = load_dataset("wikitext", "wikitext-103-raw-v1", split=split)
+    print("HEllo")
+    data_set = load_dataset("wikitext", "wikitext-103-v1", split=split)
 
     # tokenizes the sample, turning raw strings into input token IDs.
     tokenizer=AutoTokenizer.from_pretrained("Qwen/Qwen3-4B")
@@ -18,6 +19,7 @@ def get_wikitext103(split="validation", seq_len=1024, batch_size=4): # optimize/
         return {"ids": [i for i in ids if i]}
 
     tokenized = data_set.map(tokenize, batched=False, remove_columns=["text"])
+    tokenized.save_to_disk("tokenized_wikitext103")
 
     # this is where you chunk everything into fixed windows
     def chunk(example):

@@ -133,3 +133,6 @@ dmypy.json
 
 # Datasets
 /dataset/*.tokens
+
+# Cached tokenized training set
+dataset/Mixture_of_experts/*tokenized_wikitext103
