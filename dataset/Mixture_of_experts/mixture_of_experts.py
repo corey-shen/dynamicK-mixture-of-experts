@@ -61,8 +61,6 @@ class Experts(nn.Module):
 
 # gating network
 
-# Add wikitext_perplexity.py to DynamicKGating class
-
 class DynamicKGating(nn.Module):
     def __init__(
         self,
@@ -71,7 +69,8 @@ class DynamicKGating(nn.Module):
         capacity_factor_train = 1.25,
         capacity_factor_eval = 2.,
         tau = 0.7,
-        max_k = 8
+        max_k = 8,
+        model_name = ""
         ):
         super().__init__()
 
@@ -178,33 +177,7 @@ class DynamicKGating(nn.Module):
 
         return select_idx, select_probs
     
-# === Code below is what has been added ===
 
-    model_id  = "Qwen/Qwen3-4B"
-
-    tokenizer = load_from_disk("tokenized_wikitext103")
-    # model = DynamicMoE.load_pretrained(model_id).cuda().eval()
-    model = DynamicKGating()    # NOTE: to delete load_pretrained(), load_from_disk() instead?
-
-    def calculate_wikitext():
-        total_loss, n_tokens = 0.0, 0
-        ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
-
-        with torch.no_grad():
-            for batch in tokenizer:
-                ids = batch["input_ids"].cuda()
-                labels = ids.clone()
-                logits = model(ids).logits          # (b, t, vocab)
-                loss   = ce(logits[:, :-1].reshape(-1, logits.size(-1)),
-                            labels[:, 1:].reshape(-1))
-                total_loss += loss.item()
-                n_tokens   += ids[:, 1:].numel()
-
-        perplexity = math.exp(total_loss / n_tokens)
-        print(f"Perplexity Score on WikiText-103: {perplexity:8.2f}")
-    
-    
-    
 def load_pretrained(cls, map_location='cpu'):  
     """
     Loads a pretrained DynamicMoE model from a checkpoint.
@@ -227,4 +200,41 @@ def load_pretrained(cls, map_location='cpu'):
     return dataloader
 
 if __name__ == "__main__":
-    print("hello")
+    model_id  = "Qwen/Qwen3-4B"
+
+    '''
+    def __init__(
+            self,
+            dim,
+            num_gates,
+            capacity_factor_train = 1.25,
+            capacity_factor_eval = 2.,
+            tau = 0.7,
+            max_k = 8,
+            model_name = ""
+            ):
+    '''
+    tokenizer = load_from_disk("tokenized_wikitext103")
+    # model = DynamicMoE.load_pretrained(model_id).cuda().eval()
+    model = DynamicKGating(4, 4, 1.25, 2, 0.7, 8, model_id)
+    #print(f"Model shape: {model.shape[-1]}")
+    print(f"Model dimension: {model.dim}")
+
+    #def calculate_wikitext():
+    total_loss, n_tokens = 0.0, 0
+    ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
+
+    forward_pass = model.forward()  # returns a tuple of length 3
+
+    with torch.grad():
+        for batch in tokenizer:
+            ids = batch["input_ids"].cuda()
+            labels = ids.clone()
+            logits = model(ids).logits          # (b, t, vocab)   model[ids].logits
+            loss   = ce(logits[:, :-1].reshape(-1, logits.size(-1)),
+                        labels[:, 1:].reshape(-1))
+            total_loss += loss.item()
+            n_tokens   += ids[:, 1:].numel()
+
+    perplexity = math.exp(total_loss / n_tokens)
+    print(f"Perplexity Score on WikiText-103: {perplexity:8.2f}")
