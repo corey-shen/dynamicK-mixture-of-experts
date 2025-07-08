@@ -61,6 +61,8 @@ class Experts(nn.Module):
 
 # gating network
 
+# Add wikitext_perplexity.py to DynamicKGating class
+
 class DynamicKGating(nn.Module):
     def __init__(
         self,
@@ -175,6 +177,33 @@ class DynamicKGating(nn.Module):
         select_probs = select_probs / renormalization
 
         return select_idx, select_probs
+    
+# === Code below is what has been added ===
+
+    model_id  = "Qwen/Qwen3-4B"
+
+    tokenizer = load_from_disk("tokenized_wikitext103")
+    # model = DynamicMoE.load_pretrained(model_id).cuda().eval()
+    model = DynamicKGating()    # NOTE: to delete load_pretrained(), load_from_disk() instead?
+
+    def calculate_wikitext():
+        total_loss, n_tokens = 0.0, 0
+        ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
+
+        with torch.no_grad():
+            for batch in tokenizer:
+                ids = batch["input_ids"].cuda()
+                labels = ids.clone()
+                logits = model(ids).logits          # (b, t, vocab)
+                loss   = ce(logits[:, :-1].reshape(-1, logits.size(-1)),
+                            labels[:, 1:].reshape(-1))
+                total_loss += loss.item()
+                n_tokens   += ids[:, 1:].numel()
+
+        perplexity = math.exp(total_loss / n_tokens)
+        print(f"Perplexity Score on WikiText-103: {perplexity:8.2f}")
+    
+    
     
 def load_pretrained(cls, map_location='cpu'):  
     """
