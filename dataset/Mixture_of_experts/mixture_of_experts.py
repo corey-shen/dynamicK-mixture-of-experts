@@ -3,11 +3,11 @@ from torch import nn
 import math
 from inspect import isfunction
 from wikitext_loader import get_wikitext103
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoModel
 from datasets import load_from_disk
 from torch.utils.data import DataLoader
 
-MIN_EXPERT_CAPACITY = 4
+MIN_EXPERT_CAPACITY = 4     # Used in line 101 as part of expert_capacity calculation
 
 def default(val, default_val):
     default_val = default_val() if isfunction(default_val) else default_val
@@ -29,32 +29,32 @@ GELU = nn.GELU if hasattr(nn, 'GELU') else GELU_
 
 # expert class
 
-class Experts(nn.Module):
-    def __init__(self,
-        dim,
-        num_experts = 16,
-        hidden_dim = None,
-        activation = GELU):
-        super().__init__()
+# class Experts(nn.Module):
+#     def __init__(self,
+#         dim,
+#         num_experts = 16,
+#         hidden_dim = None,
+#         activation = GELU):
+#         super().__init__()
 
-        hidden_dim = default(hidden_dim, dim * 4)
-        num_experts = cast_tuple(num_experts)
+#         hidden_dim = default(hidden_dim, dim * 4)
+#         num_experts = cast_tuple(num_experts)
 
-        w1 = torch.zeros(*num_experts, dim, hidden_dim)     # raw weight tensors
-        w2 = torch.zeros(*num_experts, hidden_dim, dim)     
+#         w1 = torch.zeros(*num_experts, dim, hidden_dim)     # raw weight tensors
+#         w2 = torch.zeros(*num_experts, hidden_dim, dim)     
 
-        w1 = init_(w1)
-        w2 = init_(w2)
+#         w1 = init_(w1)
+#         w2 = init_(w2)
 
-        self.w1 = nn.Parameter(w1)
-        self.w2 = nn.Parameter(w2)
-        self.act = activation()
+#         self.w1 = nn.Parameter(w1)
+#         self.w2 = nn.Parameter(w2)
+#         self.act = activation()
 
-    def forward(self, x):
-        hidden = torch.einsum('...nd,...dh->...nh', x, self.w1)    # Get each token's hidden representation/expert
-        hidden = self.act(hidden)
-        out    = torch.einsum('...nh,...hd->...nd', hidden, self.w2)    # Project back to the original embedded size
-        return out
+#     def forward(self, x):
+#         hidden = torch.einsum('...nd,...dh->...nh', x, self.w1)    # Get each token's hidden representation/expert
+#         hidden = self.act(hidden)
+#         out    = torch.einsum('...nh,...hd->...nd', hidden, self.w2)    # Project back to the original embedded size
+#         return out
 
 # the below code is almost all transcribed from the official tensorflow version, from which the papers are written
 # https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/models/research/moe.py
@@ -64,23 +64,30 @@ class Experts(nn.Module):
 class DynamicKGating(nn.Module):
     def __init__(
         self,
-        dim,
-        num_gates,
-        capacity_factor_train = 1.25,
-        capacity_factor_eval = 2.,
-        tau = 0.7,
-        max_k = 8,
-        model_name = ""
+        num_gates,  # Used for expert_capacity (benchmark),
+        training=True,  # Used for self.training as a boolean value
+        capacity_factor_train = 1.25,   # arbitrary values? | Used for calculating expert_capacity
+        capacity_factor_eval = 2.,      # arbitrary values? | Used for calculating expert_capacity
+        tau = 0.7,  # Hyperparameter we can adjust
+        max_k = 8,  # Max number of experts 
+        model_name = ""     # Name of the model we're running
         ):
-        super().__init__()
+        #super().__init__()
 
         self.num_gates = num_gates
-        self.w_gating = nn.Parameter(torch.randn(dim, num_gates))
+        self.w_gating = nn.Parameter(torch.randn(dim, num_gates))   # Calculation for logits
 
+        self.training = training    # Boolean value | True by default
         self.capacity_factor_train = capacity_factor_train
         self.capacity_factor_eval = capacity_factor_eval
         self.tau = tau
         self.max_k = max_k
+        self.model_name = model_name
+
+        embed_model = AutoModel.from_pretrained(model_name)
+        self.model = embed_model
+        dim         = embed_model.config.hidden_size
+        print(f"Dimension: {dim}")
 
     def forward(self, x):
         *_, b, group_size, dim = x.shape
@@ -105,7 +112,7 @@ class DynamicKGating(nn.Module):
         dispatch_tensor = torch.zeros_like(combine_tensor)
         
         # Track current position for each expert across all tokens
-        expert_positions = torch.zeros(num_gates, dtype=torch.long, device=x.device)
+        expert_positions = torch.zeros(num_gates, dtype=torch.long, device=x.device) 
         
         # Process each token in the batch
         for batch_idx in range(b):
@@ -204,29 +211,28 @@ if __name__ == "__main__":
 
     '''
     def __init__(
-            self,
-            dim,
-            num_gates,
-            capacity_factor_train = 1.25,
-            capacity_factor_eval = 2.,
-            tau = 0.7,
-            max_k = 8,
-            model_name = ""
-            ):
+        self,
+        num_gates,  # Used for expert_capacity (benchmark),
+        training=True,  # Used for self.training as a boolean value
+        capacity_factor_train = 1.25,   # arbitrary values? | Used for calculating expert_capacity
+        capacity_factor_eval = 2.,      # arbitrary values? | Used for calculating expert_capacity
+        tau = 0.7,  # Hyperparameter we can adjust
+        max_k = 8,  # Max number of experts 
+        model_name = ""     # Name of the model we're running
+        )
     '''
     tokenizer = load_from_disk("tokenized_wikitext103")
     # model = DynamicMoE.load_pretrained(model_id).cuda().eval()
-    model = DynamicKGating(4, 4, 1.25, 2, 0.7, 8, model_id)
+    model = DynamicKGating(4, True, 1.25, 2, 0.7, 8, model_id)
     #print(f"Model shape: {model.shape[-1]}")
-    print(f"Model dimension: {model.dim}")
 
     #def calculate_wikitext():
     total_loss, n_tokens = 0.0, 0
-    ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")
+    ce = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction="sum")  # Loss function
 
     forward_pass = model.forward()  # returns a tuple of length 3
 
-    with torch.grad():
+    with torch.no_grad():
         for batch in tokenizer:
             ids = batch["input_ids"].cuda()
             labels = ids.clone()
