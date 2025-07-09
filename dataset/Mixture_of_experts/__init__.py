@@ -1,2 +1,2 @@
-from .mixture_of_experts import DynamicMoE, DynamicKGating, Experts
+from ..Deprecated.dynamic_k_moe_original import DynamicMoE, DynamicKGating, Experts
 __all__ = ['DynamicMoE', 'DynamicKGating', 'Experts']

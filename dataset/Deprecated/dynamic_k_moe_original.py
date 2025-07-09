@@ -66,8 +66,7 @@ class DynamicKGating(nn.Module):
         self,
         num_gates,  # Used for expert_capacity (benchmark),
         training=True,  # Used for self.training as a boolean value
-        capacity_factor_train = 1.25,   # arbitrary values? | Used for calculating expert_capacity
-        capacity_factor_eval = 2.,      # arbitrary values? | Used for calculating expert_capacity
+        capacity_factor = 1.25,   # arbitrary values? | Used for calculating expert_capacity
         tau = 0.7,  # Hyperparameter we can adjust
         max_k = 8,  # Max number of experts 
         model_name = ""     # Name of the model we're running
@@ -78,8 +77,7 @@ class DynamicKGating(nn.Module):
         self.w_gating = nn.Parameter(torch.randn(dim, num_gates))   # Calculation for logits
 
         self.training = training    # Boolean value | True by default
-        self.capacity_factor_train = capacity_factor_train
-        self.capacity_factor_eval = capacity_factor_eval
+        self.capacity_factor = capacity_factor
         self.tau = tau
         self.max_k = max_k
         self.model_name = model_name
@@ -89,14 +87,9 @@ class DynamicKGating(nn.Module):
         dim         = embed_model.config.hidden_size
         print(f"Dimension: {dim}")
 
-    def forward(self, x):
+    def forward(self, x): # [128,512]
         *_, b, group_size, dim = x.shape
         num_gates = self.num_gates
-
-        if self.training:
-            capacity_factor = self.capacity_factor_train
-        else:
-            capacity_factor = self.capacity_factor_eval
 
         raw_gates = torch.einsum('...bnd,...de->...bne', x, self.w_gating)
         
@@ -104,7 +97,7 @@ class DynamicKGating(nn.Module):
         selected_experts, selected_probs = self.top_router(raw_gates, self.tau, self.max_k)
         
         # Calculate how many tokens each expert can handle
-        expert_capacity = min(group_size, int((group_size * capacity_factor) / num_gates))
+        expert_capacity = min(group_size, int((group_size * self.capacity_factor) / num_gates))
         expert_capacity = max(expert_capacity, MIN_EXPERT_CAPACITY)
         
         # Initialize result tensors
