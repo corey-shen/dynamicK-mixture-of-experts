@@ -13,7 +13,7 @@ import pickle
 import math
 
 # Import the Dynamic-K MoE model (assuming it's available)
-# from dynamic_k_moe import DynamicKMoETransformer
+from dynamic_k_moe import DynamicKMoETransformer
 
 class WikiTextTokenizer:
     """Custom tokenizer for Wikitext dataset with vocabulary building"""
@@ -172,10 +172,11 @@ def load_wikitext_data(data_dir):
                 content = f.read()
             
             # Split into articles (separated by double newlines)
-            articles = content.split('\n\n')
+            articles = content.split('\n')
             
             # Filter out empty articles and headers
             cleaned_articles = []
+            print(f"Length of articles: {len(articles)}")
             for article in articles:
                 article = article.strip()
                 if len(article) > 100 and not article.startswith('='):
@@ -189,6 +190,7 @@ def load_wikitext_data(data_dir):
     
     # File paths for Wikitext-103
     train_file = os.path.join(data_dir, 'wiki.train.tokens')
+    #train_file = "dataset/Mixture_of_experts/wikitext-103/wiki.train.tokens"
     valid_file = os.path.join(data_dir, 'wiki.valid.tokens')
     test_file = os.path.join(data_dir, 'wiki.test.tokens')
     
@@ -198,6 +200,13 @@ def load_wikitext_data(data_dir):
     train_texts = read_file(train_file) if os.path.exists(train_file) else []
     valid_texts = read_file(valid_file) if os.path.exists(valid_file) else []
     test_texts = read_file(test_file) if os.path.exists(test_file) else []
+    print(f"Train file exists: {os.path.exists(train_file)}")  
+    print(f"Valid file exists: {os.path.exists(valid_file)}")  
+    print(f"Test file exists: {os.path.exists(test_file)}")    
+
+    # print(f"Train texts: {train_texts}")
+    # print(f"Valid texts: {valid_texts}")
+    # print(f"Test texts: {test_texts}")
     
     print(f"Loaded {len(train_texts)} training articles")
     print(f"Loaded {len(valid_texts)} validation articles")
@@ -277,10 +286,12 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
         
         train_pbar = tqdm(train_loader, desc="Training")
         for batch_idx, (input_ids, target_ids) in enumerate(train_pbar):
+            print(f"Reached inner for loop, iteration number: {batch_idx} | Reached line 289")
             input_ids, target_ids = input_ids.to(device), target_ids.to(device)
             
             # Forward pass
             outputs = model(input_ids)
+            print("Reached line 294")
             
             # Calculate losses
             lm_loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
@@ -297,6 +308,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             scheduler.step()
+            print(f"Gets through backward pass | Reached line 310")
             
             # Track metrics
             valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
@@ -306,6 +318,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             # Collect routing statistics
             for layer_idx, stats in enumerate(outputs['routing_stats']):
                 epoch_routing_stats[f'layer_{layer_idx}_avg_k'].append(stats['avg_k'])
+            print("Reached line 320")
             
             # Update progress bar
             current_ppl = math.exp(lm_loss.item())
@@ -451,7 +464,10 @@ def main():
         print(f"  {key}: {value}")
     
     # Data directory (update this path)
-    data_dir = "wikitext-103"  # Update this to your Wikitext-103 directory
+    print(f"Test.tokens: {os.path.exists("wikitext-103/wiki.test.tokens")}")
+    print(f"Train.tokens: {os.path.exists("wikitext-103/wiki.train.tokens")}")
+    print(f"Valid.tokens: {os.path.exists("wikitext-103/wiki.valid.tokens")}")
+    data_dir = "./wikitext-103"  # Update this to your Wikitext-103 directory
     tokenizer_path = "wikitext_tokenizer.pkl"
     
     # Load or create tokenizer
