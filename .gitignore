@@ -135,4 +135,7 @@ dmypy.json
 /dataset/*.tokens
 
 # Cached tokenized training set
-dataset/Mixture_of_experts/*tokenized_wikitext103
+dataset/Deprecated/*tokenized_wikitext103
+
+# Wikitext-103
+dataset/Mixture_of_experts/wikitext-103/*.tokens
