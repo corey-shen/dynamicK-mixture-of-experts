@@ -222,10 +222,15 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
     criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.special_tokens['<PAD>'], reduction='sum')
     
     with torch.no_grad():
+        print(f"Length of tqdm: {len(tqdm)} | line 225")
+        count = len(tqdm(dataloader, desc="Calculating perplexity"))
+        count2 = 0
         for input_ids, target_ids in tqdm(dataloader, desc="Calculating perplexity"):
             input_ids, target_ids = input_ids.to(device), target_ids.to(device)
             
             outputs = model(input_ids)
+            count2 += 1
+            print(f"Iteration number: {count2} of {count}")
             loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
                            target_ids.view(-1))
             
