@@ -11,6 +11,16 @@ import re
 from collections import Counter, defaultdict
 import pickle
 import math
+import inspect
+
+def get_current_line_number():
+    """
+    Returns the line number where this function is called.
+    """
+    frame = inspect.currentframe()
+    if frame and frame.f_back:
+        return frame.f_back.f_lineno
+    return None
 
 # Import the Dynamic-K MoE model (assuming it's available)
 from dynamic_k_moe import DynamicKMoETransformer
@@ -134,8 +144,9 @@ class WikiTextDataset(Dataset):
         
         print("Tokenizing dataset...")
         self.examples = []
-        
-        for text in tqdm(texts, desc="Creating examples"):
+
+        print(f"Total length: {len(texts)}")
+        for text in tqdm(texts, total=len(texts), desc="Creating examples"):
             if len(text.strip()) < 50:  # Skip very short texts
                 continue
                 
@@ -222,7 +233,7 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
     criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.special_tokens['<PAD>'], reduction='sum')
     
     with torch.no_grad():
-        print(f"Length of tqdm: {len(tqdm)} | line 225")
+        #print(f"Length of tqdm: {len(tqdm(dataloader, desc="Calculating perplexity"))} | line 225")
         count = len(tqdm(dataloader, desc="Calculating perplexity"))
         count2 = 0
         for input_ids, target_ids in tqdm(dataloader, desc="Calculating perplexity"):
@@ -289,14 +300,17 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
         train_tokens = 0
         epoch_routing_stats = defaultdict(list)
         
+        num_batches = len(train_loader)
+        print(f"Number of iterations (batches) this epoch: {num_batches}")
         train_pbar = tqdm(train_loader, desc="Training")
+        print(f"Total iterations according to tqdm: {train_pbar.total}")
         for batch_idx, (input_ids, target_ids) in enumerate(train_pbar):
-            print(f"Reached inner for loop, iteration number: {batch_idx} | Reached line 289")
+            print(f"Reached line {get_current_line_number()}")
             input_ids, target_ids = input_ids.to(device), target_ids.to(device)
             
             # Forward pass
             outputs = model(input_ids)
-            print("Reached line 294")
+            print(f"Reached line {get_current_line_number()}")
             
             # Calculate losses
             lm_loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
@@ -313,7 +327,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             scheduler.step()
-            print(f"Gets through backward pass | Reached line 310")
+            print(f"Reached line {get_current_line_number()}")
             
             # Track metrics
             valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
@@ -323,7 +337,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             # Collect routing statistics
             for layer_idx, stats in enumerate(outputs['routing_stats']):
                 epoch_routing_stats[f'layer_{layer_idx}_avg_k'].append(stats['avg_k'])
-            print("Reached line 320")
+            print(f"Reached line {get_current_line_number()}")
             
             # Update progress bar
             current_ppl = math.exp(lm_loss.item())

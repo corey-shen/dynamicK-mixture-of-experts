@@ -4,6 +4,15 @@ import torch.nn.functional as F
 import math
 import inspect
 
+def get_current_line_number():
+    """
+    Returns the line number where this function is called.
+    """
+    frame = inspect.currentframe()
+    if frame and frame.f_back:
+        return frame.f_back.f_lineno
+    return None
+
 class DynamicKRouter(nn.Module):
     """
     Dynamic-K routing based on probability threshold.
@@ -141,9 +150,9 @@ class DynamicKMoELayer(nn.Module):
         
         # Process tokens through selected experts
         for b in range(batch_size):
-            print(f"Iterating through batch {b} of batch size {batch_size} | line 143")
+            #print(f"Iterating through batch {b} of batch size {batch_size} | line 143")
             for s in range(seq_len):
-                print(f"Iterating through sequence {s} of sequence length {seq_len}, batch {b} batch size {batch_size} | line 145")
+                #print(f"Iterating through sequence {s} of sequence length {seq_len}, batch {b} batch size {batch_size} | line 145")
                 token_input = x[b, s]  # [hidden_dim]
                 token_output = torch.zeros_like(token_input)
                 
@@ -198,21 +207,21 @@ class DynamicKTransformerBlock(nn.Module):
     """Transformer block with Dynamic-K MoE"""
     def __init__(self, hidden_dim, num_heads, num_experts, expert_dim, 
                  threshold=0.8, dropout=0.1):
-        print("Within DynamicKTransformerBlock class | line 197")
+        print(f"Reached line {get_current_line_number()}")
         super().__init__()
-        print("Finished super().__init__() | line 199")
+        print(f"Reached line {get_current_line_number()}")
         
         # Multi-head attention
         self.attention = nn.MultiheadAttention(
             hidden_dim, num_heads, dropout=dropout, batch_first=True
         )
-        print("Finished Multi-head attention | line 205")
+        print(f"Reached line {get_current_line_number()}")
         
         # Dynamic-K MoE layer
         self.moe = DynamicKMoELayer(
             hidden_dim, num_experts, expert_dim, threshold, dropout=dropout
         )
-        print("Finished Dynamic-K MoE layer | line 211")
+        print(f"Reached line {get_current_line_number()}")
         
         # Layer normalization
         self.norm1 = nn.LayerNorm(hidden_dim)
@@ -223,14 +232,14 @@ class DynamicKTransformerBlock(nn.Module):
     
     def forward(self, x, attn_mask=None):
         # Self-attention with residual connection
-        print("Reached forward() of DynamicKTransformerBlock class | line 222")
+        print(f"Reached line {get_current_line_number()}")
         attn_out, _ = self.attention(x, x, x, attn_mask=attn_mask)
-        print("Reached line 224")
+        print(f"Reached line {get_current_line_number()}")
         x = self.norm1(x + self.dropout(attn_out))
         
         # Dynamic-K MoE with residual connection
         moe_out, aux_loss, routing_stats = self.moe(x)
-        print("Reached line 229")
+        print(f"Reached line {get_current_line_number()}")
         x = self.norm2(x + self.dropout(moe_out))
         
         return x, aux_loss, routing_stats
@@ -275,18 +284,18 @@ class DynamicKMoETransformer(nn.Module):
                 nn.init.normal_(module.weight, mean=0.0, std=0.02)
     
     def forward(self, input_ids, attention_mask=None):
-        print("Reaches forward pass within DynamicKMoETransformer class | Line 267 /dynamic_k_moe.py")
+        print(f"Reached line {get_current_line_number()}")
         batch_size, seq_len = input_ids.shape
         
         # Create position indices
         positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
-        print("Create position indices | line 272")
+        print(f"Reached line {get_current_line_number()}")
         
         # Embeddings
         token_embeds = self.token_embedding(input_ids)
         position_embeds = self.position_embedding(positions)
         x = self.embedding_dropout(token_embeds + position_embeds)
-        print("Create embeddings | line 278")
+        print(f"Reached line {get_current_line_number()}")
         
         # Process through transformer blocks
         total_aux_loss = 0.0
@@ -297,12 +306,12 @@ class DynamicKMoETransformer(nn.Module):
             x, aux_loss, routing_stats = block(x, attention_mask)
             total_aux_loss += aux_loss
             all_routing_stats.append(routing_stats)
-        print("Finished iterating in self.blocks | line 288")
+        print(f"Reached line {get_current_line_number()}")
         
         # Final processing
         x = self.final_norm(x)
         logits = self.output_projection(x)
-        print("Final processing | line 293")
+        print(f"Reached line {get_current_line_number()}")
         
         # Average auxiliary loss across layers
         avg_aux_loss = total_aux_loss / len(self.blocks)
