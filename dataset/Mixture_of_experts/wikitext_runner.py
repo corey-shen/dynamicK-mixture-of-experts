@@ -245,10 +245,13 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
             loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
                            target_ids.view(-1))
             
+            print("target_ids: "{target_ids})
             # Count non-padding tokens
             valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
             
             total_loss += loss.item()
+            print("total_loss: {total_loss}")
+
             total_tokens += valid_tokens
     
     avg_loss = total_loss / total_tokens
@@ -292,133 +295,139 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
     
     num_epochs = 1 #for testing, to make sure the run is successful
     for epoch in range(num_epochs):
-        print(f"\nEpoch {epoch + 1}/{num_epochs}")
-        print("-" * 60)
-        
-        # Training phase
-        model.train()
-        train_loss = 0.0
-        train_tokens = 0
-        epoch_routing_stats = defaultdict(list)
-        
-        num_batches = len(train_loader)
-        print(f"Number of iterations (batches) this epoch: {num_batches}")
-        train_pbar = tqdm(train_loader, desc="Training")
-        print(f"Total iterations according to tqdm: {train_pbar.total}")
-        for batch_idx, (input_ids, target_ids) in enumerate(train_pbar):
-            print(f"Reached line {get_current_line_number()}")
-            input_ids, target_ids = input_ids.to(device), target_ids.to(device)
-            
-            # Forward pass
-            outputs = model(input_ids)
-            print(f"Reached line {get_current_line_number()} (after forward pass)")
-            
-            # Calculate losses
-            lm_loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
-                              target_ids.view(-1))
-            aux_loss = outputs['aux_loss']
-            print(f"Reached line {get_current_line_number()} (after calculating losses)")
-            
-            # Adaptive auxiliary loss weight (higher early in training)
-            aux_weight = 0.1 * (1.0 - epoch / num_epochs)
-            total_loss = lm_loss + aux_weight * aux_loss
-            
-            # Backward pass
-            optimizer.zero_grad()
-            total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
-            print(f"Reached line {get_current_line_number()} (after backward pass)")
-            
-            # Track metrics
-            valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
-            train_loss += lm_loss.item() * valid_tokens
-            train_tokens += valid_tokens
-            
-            # Collect routing statistics
-            for layer_idx, stats in enumerate(outputs['routing_stats']):
-                epoch_routing_stats[f'layer_{layer_idx}_avg_k'].append(stats['avg_k'])
-            print(f"Reached line {get_current_line_number()} (after collecting routing stats)")
-            
-            # Update progress bar
-            current_ppl = math.exp(lm_loss.item())
-            train_pbar.set_postfix({
-                'Loss': f'{lm_loss.item():.4f}',
-                'PPL': f'{current_ppl:.2f}',
-                'Aux': f'{aux_loss.item():.4f}',
-                'LR': f'{scheduler.get_last_lr()[0]:.6f}'
-            })
-            
-            # Periodic validation during training
-            if batch_idx % 1000 == 0 and batch_idx > 0:
-                model.eval()
-                val_sample_loss = 0.0
-                val_sample_tokens = 0
-                
-                with torch.no_grad():
-                    print(f"Reached line {get_current_line_number()} (within peiodic validation)")
-                    for i, (val_input, val_target) in enumerate(val_loader):
-                        if i >= 10:  # Quick validation sample
-                            break
-                        val_input, val_target = val_input.to(device), val_target.to(device)
-                        val_outputs = model(val_input)
-                        print(f"Reached line {get_current_line_number()} (after getting val outputs)")
-                        val_loss = criterion(val_outputs['logits'].view(-1, val_outputs['logits'].size(-1)), 
-                                           val_target.view(-1))
-                        val_tokens = (val_target != tokenizer.special_tokens['<PAD>']).sum().item()
-                        val_sample_loss += val_loss.item() * val_tokens
-                        val_sample_tokens += val_tokens
-                    print(f"Reached line {get_current_line_number()} (after validation iteration)")
-                
-                if val_sample_tokens > 0:
-                    sample_ppl = math.exp(val_sample_loss / val_sample_tokens)
-                    print(f"\n  Batch {batch_idx}: Sample Val PPL = {sample_ppl:.2f}")
-                
-                model.train()
-        
-        # Calculate epoch training metrics
-        avg_train_loss = train_loss / train_tokens
-        train_perplexity = math.exp(avg_train_loss)
-        
-        # Validation phase
-        print("Running full validation...")
-        val_perplexity = calculate_perplexity(model, val_loader, device, tokenizer)
-        
-        # Save metrics
-        history['train_loss'].append(avg_train_loss)
-        history['train_perplexity'].append(train_perplexity)
-        history['val_perplexity'].append(val_perplexity)
-        
-        # Average routing stats
-        epoch_avg_routing = {}
-        for key, values in epoch_routing_stats.items():
-            epoch_avg_routing[key] = np.mean(values)
-        print(f"Reached line {get_current_line_number()} (after calculating average routing stats)")
-        history['routing_stats'].append(epoch_avg_routing)
-        
-        # Print epoch summary
-        print(f"Train Loss: {avg_train_loss:.4f} | Train PPL: {train_perplexity:.2f}")
-        print(f"Val PPL: {val_perplexity:.2f}")
-        
-        if epoch_avg_routing:
-            avg_k_all_layers = np.mean([v for k, v in epoch_avg_routing.items() if 'avg_k' in k])
-            print(f"Average experts per token: {avg_k_all_layers:.2f}")
-        
-        # Save best model
-        if val_perplexity < best_val_perplexity:
-            best_val_perplexity = val_perplexity
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_perplexity': val_perplexity,
-                'tokenizer': tokenizer,
-                'config': model.config if hasattr(model, 'config') else None
-            }, 'best_wikitext_dynamic_k_moe.pt')
-            print(f"✓ New best model saved (Val PPL: {val_perplexity:.2f})")
+        epoch_code(model, train_loader, val_loader, tokenizer, device='cpu', optimizer, scheduler, history, best_val_perplexity)
+        print(f"Reached line {get_current_line_number()} (finished an epoch of training)")
+
     
     return history
+
+def epoch_code(model, train_loader, val_loader, tokenizer, device='cpu', optimizer, scheduler, history, best_val_perplexity):
+    print(f"\nEpoch {epoch + 1}/{num_epochs}")
+    print("-" * 60)
+    
+    # Training phase
+    model.train()
+    train_loss = 0.0
+    train_tokens = 0
+    epoch_routing_stats = defaultdict(list)
+    
+    num_batches = len(train_loader)
+    print(f"Number of iterations (batches) this epoch: {num_batches}")
+    train_pbar = tqdm(train_loader, desc="Training")
+    print(f"Total iterations according to tqdm: {train_pbar.total}")
+    for batch_idx, (input_ids, target_ids) in enumerate(train_pbar):
+        print(f"Reached line {get_current_line_number()}")
+        input_ids, target_ids = input_ids.to(device), target_ids.to(device)
+        
+        # Forward pass
+        outputs = model(input_ids)
+        print(f"Reached line {get_current_line_number()} (after forward pass)")
+        
+        # Calculate losses
+        lm_loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
+                            target_ids.view(-1))
+        aux_loss = outputs['aux_loss']
+        print(f"Reached line {get_current_line_number()} (after calculating losses)")
+        
+        # Adaptive auxiliary loss weight (higher early in training)
+        aux_weight = 0.1 * (1.0 - epoch / num_epochs)
+        total_loss = lm_loss + aux_weight * aux_loss
+        
+        # Backward pass
+        optimizer.zero_grad()
+        total_loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        scheduler.step()
+        print(f"Reached line {get_current_line_number()} (after backward pass)")
+        
+        # Track metrics
+        valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
+        train_loss += lm_loss.item() * valid_tokens
+        train_tokens += valid_tokens
+        
+        # Collect routing statistics
+        for layer_idx, stats in enumerate(outputs['routing_stats']):
+            epoch_routing_stats[f'layer_{layer_idx}_avg_k'].append(stats['avg_k'])
+        print(f"Reached line {get_current_line_number()} (after collecting routing stats)")
+        
+        # Update progress bar
+        current_ppl = math.exp(lm_loss.item())
+        train_pbar.set_postfix({
+            'Loss': f'{lm_loss.item():.4f}',
+            'PPL': f'{current_ppl:.2f}',
+            'Aux': f'{aux_loss.item():.4f}',
+            'LR': f'{scheduler.get_last_lr()[0]:.6f}'
+        })
+        
+        # Periodic validation during training
+        if batch_idx % 1000 == 0 and batch_idx > 0:
+            model.eval()
+            val_sample_loss = 0.0
+            val_sample_tokens = 0
+            
+            with torch.no_grad():
+                print(f"Reached line {get_current_line_number()} (within peiodic validation)")
+                for i, (val_input, val_target) in enumerate(val_loader):
+                    if i >= 10:  # Quick validation sample
+                        break
+                    val_input, val_target = val_input.to(device), val_target.to(device)
+                    val_outputs = model(val_input)
+                    print(f"Reached line {get_current_line_number()} (after getting val outputs)")
+                    val_loss = criterion(val_outputs['logits'].view(-1, val_outputs['logits'].size(-1)), 
+                                        val_target.view(-1))
+                    val_tokens = (val_target != tokenizer.special_tokens['<PAD>']).sum().item()
+                    val_sample_loss += val_loss.item() * val_tokens
+                    val_sample_tokens += val_tokens
+                print(f"Reached line {get_current_line_number()} (after validation iteration)")
+            
+            if val_sample_tokens > 0:
+                sample_ppl = math.exp(val_sample_loss / val_sample_tokens)
+                print(f"\n  Batch {batch_idx}: Sample Val PPL = {sample_ppl:.2f}")
+            
+            model.train()
+    
+    # Calculate epoch training metrics
+    avg_train_loss = train_loss / train_tokens
+    train_perplexity = math.exp(avg_train_loss)
+    
+    # Validation phase
+    print("Running full validation...")
+    val_perplexity = calculate_perplexity(model, val_loader, device, tokenizer)
+    
+    # Save metrics
+    history['train_loss'].append(avg_train_loss)
+    history['train_perplexity'].append(train_perplexity)
+    history['val_perplexity'].append(val_perplexity)
+    
+    # Average routing stats
+    epoch_avg_routing = {}
+    for key, values in epoch_routing_stats.items():
+        epoch_avg_routing[key] = np.mean(values)
+    print(f"Reached line {get_current_line_number()} (after calculating average routing stats)")
+    history['routing_stats'].append(epoch_avg_routing)
+    
+    # Print epoch summary
+    print(f"Train Loss: {avg_train_loss:.4f} | Train PPL: {train_perplexity:.2f}")
+    print(f"Val PPL: {val_perplexity:.2f}")
+    
+    if epoch_avg_routing:
+        avg_k_all_layers = np.mean([v for k, v in epoch_avg_routing.items() if 'avg_k' in k])
+        print(f"Average experts per token: {avg_k_all_layers:.2f}")
+    
+    # Save best model
+    if val_perplexity < best_val_perplexity:
+        best_val_perplexity = val_perplexity
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_perplexity': val_perplexity,
+            'tokenizer': tokenizer,
+            'config': model.config if hasattr(model, 'config') else None
+        }, 'best_wikitext_dynamic_k_moe.pt')
+        print(f"✓ New best model saved (Val PPL: {val_perplexity:.2f})")
+    
 
 def generate_wikitext_sample(model, tokenizer, prompt="The", max_length=200, temperature=0.8, device='cpu'):
     """Generate text sample using the trained model"""
