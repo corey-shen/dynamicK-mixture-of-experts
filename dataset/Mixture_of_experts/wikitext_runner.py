@@ -290,6 +290,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
     model.to(device)
     best_val_perplexity = float('inf')
     
+    num_epochs = 1 #for testing, to make sure the run is successful
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch + 1}/{num_epochs}")
         print("-" * 60)
@@ -310,12 +311,13 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             
             # Forward pass
             outputs = model(input_ids)
-            print(f"Reached line {get_current_line_number()}")
+            print(f"Reached line {get_current_line_number()} (after forward pass)")
             
             # Calculate losses
             lm_loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
                               target_ids.view(-1))
             aux_loss = outputs['aux_loss']
+            print(f"Reached line {get_current_line_number()} (after calculating losses)")
             
             # Adaptive auxiliary loss weight (higher early in training)
             aux_weight = 0.1 * (1.0 - epoch / num_epochs)
@@ -327,7 +329,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             scheduler.step()
-            print(f"Reached line {get_current_line_number()}")
+            print(f"Reached line {get_current_line_number()} (after backward pass)")
             
             # Track metrics
             valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
@@ -337,7 +339,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
             # Collect routing statistics
             for layer_idx, stats in enumerate(outputs['routing_stats']):
                 epoch_routing_stats[f'layer_{layer_idx}_avg_k'].append(stats['avg_k'])
-            print(f"Reached line {get_current_line_number()}")
+            print(f"Reached line {get_current_line_number()} (after collecting routing stats)")
             
             # Update progress bar
             current_ppl = math.exp(lm_loss.item())
@@ -355,16 +357,19 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
                 val_sample_tokens = 0
                 
                 with torch.no_grad():
+                    print(f"Reached line {get_current_line_number()} (within peiodic validation)")
                     for i, (val_input, val_target) in enumerate(val_loader):
                         if i >= 10:  # Quick validation sample
                             break
                         val_input, val_target = val_input.to(device), val_target.to(device)
                         val_outputs = model(val_input)
+                        print(f"Reached line {get_current_line_number()} (after getting val outputs)")
                         val_loss = criterion(val_outputs['logits'].view(-1, val_outputs['logits'].size(-1)), 
                                            val_target.view(-1))
                         val_tokens = (val_target != tokenizer.special_tokens['<PAD>']).sum().item()
                         val_sample_loss += val_loss.item() * val_tokens
                         val_sample_tokens += val_tokens
+                    print(f"Reached line {get_current_line_number()} (after validation iteration)")
                 
                 if val_sample_tokens > 0:
                     sample_ppl = math.exp(val_sample_loss / val_sample_tokens)
@@ -389,6 +394,7 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
         epoch_avg_routing = {}
         for key, values in epoch_routing_stats.items():
             epoch_avg_routing[key] = np.mean(values)
+        print(f"Reached line {get_current_line_number()} (after calculating average routing stats)")
         history['routing_stats'].append(epoch_avg_routing)
         
         # Print epoch summary
@@ -469,9 +475,9 @@ def main():
     config = {
         'vocab_size': 50000,
         'hidden_dim': 768,
-        'num_layers': 12,
+        'num_layers': 2, #changed from 12 to 2 for testing
         'num_heads': 12,
-        'num_experts': 32,
+        'num_experts': 16, #changed from 32 to 16 for testing
         'expert_dim': 3072,
         'threshold': 0.85,
         'max_seq_len': 512,
@@ -540,6 +546,7 @@ def main():
     history = train_wikitext_model(model, train_loader, val_loader, tokenizer, 
                                  num_epochs=3, device=device)
     
+ """
     # Generate samples
     print("\nGenerating sample text...")
     sample_prompts = [
@@ -548,10 +555,12 @@ def main():
         "The concept of neural networks"
     ]
     
+
     for prompt in sample_prompts:
         generated = generate_wikitext_sample(model, tokenizer, prompt, max_length=100, device=device)
         print(f"\nPrompt: '{prompt}'")
         print(f"Generated: {generated}")
+"""
     
     # Save final results
     torch.save({
