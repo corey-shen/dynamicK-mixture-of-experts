@@ -12,6 +12,8 @@ from collections import Counter, defaultdict
 import pickle
 import math
 import inspect
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f"Using device: {device}")
 
 def get_current_line_number():
     """
@@ -245,7 +247,7 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
             loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
                            target_ids.view(-1))
             
-            print("target_ids: "{target_ids})
+            print(f"target_ids: {target_ids}")
             # Count non-padding tokens
             valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
             
@@ -258,7 +260,7 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
     perplexity = math.exp(avg_loss)
     return perplexity
 
-def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=5, device='cpu'):
+def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=5, device = device):
     """Training loop optimized for Wikitext dataset"""
     
     # Setup optimizer with different learning rates for different components
@@ -295,15 +297,14 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
     
     num_epochs = 1 #for testing, to make sure the run is successful
     for epoch in range(num_epochs):
-        epoch_code(model, train_loader, val_loader, tokenizer, device='cpu', optimizer, scheduler, history, best_val_perplexity)
+        print(f"\nEpoch {epoch + 1}/{num_epochs}")
+        epoch_code(model, train_loader, val_loader, tokenizer, epoch, num_epochs, optimizer, scheduler, criterion, history, best_val_perplexity,device = device)
         print(f"Reached line {get_current_line_number()} (finished an epoch of training)")
 
     
     return history
 
-def epoch_code(model, train_loader, val_loader, tokenizer, device='cpu', optimizer, scheduler, history, best_val_perplexity):
-    print(f"\nEpoch {epoch + 1}/{num_epochs}")
-    print("-" * 60)
+def epoch_code(model, train_loader, val_loader, tokenizer,epoch, num_epochs,  optimizer, scheduler, criterion, history, best_val_perplexity, device = device):
     
     # Training phase
     model.train()
@@ -324,6 +325,7 @@ def epoch_code(model, train_loader, val_loader, tokenizer, device='cpu', optimiz
         print(f"Reached line {get_current_line_number()} (after forward pass)")
         
         # Calculate losses
+        
         lm_loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
                             target_ids.view(-1))
         aux_loss = outputs['aux_loss']
@@ -429,7 +431,7 @@ def epoch_code(model, train_loader, val_loader, tokenizer, device='cpu', optimiz
         print(f"✓ New best model saved (Val PPL: {val_perplexity:.2f})")
     
 
-def generate_wikitext_sample(model, tokenizer, prompt="The", max_length=200, temperature=0.8, device='cpu'):
+def generate_wikitext_sample(model, tokenizer, prompt="The", max_length=200, temperature=0.8, device= device):
     """Generate text sample using the trained model"""
     model.eval()
     model.to(device)
@@ -486,7 +488,7 @@ def main():
         'hidden_dim': 768,
         'num_layers': 2, #changed from 12 to 2 for testing
         'num_heads': 12,
-        'num_experts': 16, #changed from 32 to 16 for testing
+        'num_experts': 2, #changed from 32 to 16 for testing
         'expert_dim': 3072,
         'threshold': 0.85,
         'max_seq_len': 512,
@@ -498,9 +500,9 @@ def main():
         print(f"  {key}: {value}")
     
     # Data directory (update this path)
-    print(f"Test.tokens: {os.path.exists("wikitext-103/wiki.test.tokens")}")
-    print(f"Train.tokens: {os.path.exists("wikitext-103/wiki.train.tokens")}")
-    print(f"Valid.tokens: {os.path.exists("wikitext-103/wiki.valid.tokens")}")
+    print(f"Test.tokens: {os.path.exists('wikitext-103/wiki.test.tokens')}")
+    print(f"Train.tokens: {os.path.exists('wikitext-103/wiki.train.tokens')}")
+    print(f"Valid.tokens: {os.path.exists('wikitext-103/wiki.valid.tokens')}")
     data_dir = "./wikitext-103"  # Update this to your Wikitext-103 directory
     tokenizer_path = "wikitext_tokenizer.pkl"
     
@@ -555,21 +557,21 @@ def main():
     history = train_wikitext_model(model, train_loader, val_loader, tokenizer, 
                                  num_epochs=3, device=device)
     
- """
+ 
     # Generate samples
-    print("\nGenerating sample text...")
-    sample_prompts = [
-        "The history of artificial intelligence",
-        "In the field of machine learning",
-        "The concept of neural networks"
-    ]
+    # print("\nGenerating sample text...")
+    # sample_prompts = [
+    #     "The history of artificial intelligence",
+    #     "In the field of machine learning",
+    #     "The concept of neural networks"
+    # ]
     
 
-    for prompt in sample_prompts:
-        generated = generate_wikitext_sample(model, tokenizer, prompt, max_length=100, device=device)
-        print(f"\nPrompt: '{prompt}'")
-        print(f"Generated: {generated}")
-"""
+    # for prompt in sample_prompts:
+    #     generated = generate_wikitext_sample(model, tokenizer, prompt, max_length=100, device=device)
+    #     print(f"\nPrompt: '{prompt}'")
+    #     print(f"Generated: {generated}")
+
     
     # Save final results
     torch.save({
