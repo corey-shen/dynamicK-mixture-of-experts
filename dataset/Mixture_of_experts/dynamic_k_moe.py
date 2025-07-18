@@ -543,23 +543,24 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
     
     with torch.no_grad():
         #print(f"Length of tqdm: {len(tqdm(dataloader, desc="Calculating perplexity"))} | line 225")
-        count = len(tqdm(dataloader, desc="Calculating perplexity"))
-        count2 = 0
+        
+        
         for input_ids, target_ids in tqdm(dataloader, desc="Calculating perplexity"):
             input_ids, target_ids = input_ids.to(device), target_ids.to(device)
             
             outputs = model(input_ids)
-            count2 += 1
-            print(f"Iteration number: {count2} of {count}")
+            
+            #print(f"Iteration number: {count2} of {count}")
             loss = criterion(outputs['logits'].view(-1, outputs['logits'].size(-1)), 
                            target_ids.view(-1))
             
-            print(f"target_ids: {target_ids}")
+            #print(f"target_ids: {target_ids}")
             # Count non-padding tokens
             valid_tokens = (target_ids != tokenizer.special_tokens['<PAD>']).sum().item()
+            print(f"valid_tokens: {valid_tokens} | line 560")
             
             total_loss += loss.item()
-            print("total_loss: {total_loss}")
+            print(f"total_loss: {total_loss}")
 
             total_tokens += valid_tokens
     
@@ -793,12 +794,12 @@ def main():
     config = {
         'vocab_size': 50000,
         'hidden_dim': 768,
-        'num_layers': 2, #changed from 12 to 2 for testing
+        'num_layers': 12, #changed from 12 to 2 for testing
         'num_heads': 12,
-        'num_experts': 2, #changed from 32 to 16 for testing
+        'num_experts': 16, #changed from 32 to 16 for testing
         'expert_dim': 3072,
-        'threshold': 0.85,
-        'max_seq_len': 128,
+        'threshold': 0.75,
+        'max_seq_len': 1024,
         'dropout': 0.1
     }
     
@@ -849,8 +850,8 @@ def main():
     
     # Create datasets
     print("Creating datasets...")
-    train_dataset = WikiTextDataset(train_texts, tokenizer, max_length=config['max_seq_len'], stride=256)
-    val_dataset = WikiTextDataset(val_texts, tokenizer, max_length=config['max_seq_len'], stride=512)
+    train_dataset = WikiTextDataset(train_texts, tokenizer, max_length=1024, stride=128)
+    val_dataset = WikiTextDataset(val_texts, tokenizer, max_length=256, stride=64)
     
     # Create dataloaders
     train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
