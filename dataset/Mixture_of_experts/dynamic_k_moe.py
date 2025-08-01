@@ -318,6 +318,8 @@ class DynamicKMoETransformer(nn.Module):
             x, aux_loss, routing_stats = block(x, attention_mask)
             total_aux_loss += aux_loss
             all_routing_stats.append(routing_stats)
+            for key, value in routing_stats.items():
+                print(f"{key}: {value}")
         print(f"Reached line {get_current_line_number()}")
         
         # Final processing
@@ -563,7 +565,7 @@ def calculate_perplexity(model, dataloader, device, tokenizer):
             print(f"total_loss: {total_loss}")
 
             total_tokens += valid_tokens
-    
+            print(f"total_loss: {total_loss}, total_tokens: {total_tokens}")
     avg_loss = total_loss / total_tokens
     perplexity = math.exp(avg_loss)
     return perplexity
@@ -599,6 +601,9 @@ def train_wikitext_model(model, train_loader, val_loader, tokenizer, num_epochs=
         'val_perplexity': [],
         'routing_stats': []
     }
+
+    for key, value in history.items():
+        print(f"History key: {key}, value: {value}")
     
     model.to(device)
     best_val_perplexity = float('inf')
@@ -792,7 +797,7 @@ def main():
     
     # Model configuration
     config = {
-        'vocab_size': 50000,
+        'vocab_size': 100000,
         'hidden_dim': 768,
         'num_layers': 12, #changed from 12 to 2 for testing
         'num_heads': 12,
@@ -835,6 +840,7 @@ def main():
     
     # Update vocab size based on actual tokenizer
     config['vocab_size'] = len(tokenizer.word_to_id)
+    print(f"Tokenizer vocabulary size: {len(tokenizer.word_to_id)}")
     print(f"Actual vocabulary size: {config['vocab_size']}")
     
     # Create model
@@ -850,12 +856,12 @@ def main():
     
     # Create datasets
     print("Creating datasets...")
-    train_dataset = WikiTextDataset(train_texts, tokenizer, max_length=1024, stride=128)
+    train_dataset = WikiTextDataset(train_texts, tokenizer, max_length=512, stride=128)
     val_dataset = WikiTextDataset(val_texts, tokenizer, max_length=256, stride=64)
     
     # Create dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=4)
+    train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=8)
+    val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=8)
     
     print(f"Training examples: {len(train_dataset)}")
     print(f"Validation examples: {len(val_dataset)}")
