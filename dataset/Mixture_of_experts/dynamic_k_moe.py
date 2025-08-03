@@ -264,7 +264,8 @@ class DynamicKMoETransformer(nn.Module):
         
         self.hidden_dim = hidden_dim
         self.max_seq_len = max_seq_len
-        
+        self.register_buffer("position_ids", torch.arange(max_seq_len).unsqueeze(0), persistent=False)
+                     
         # Embeddings
         self.token_embedding = nn.Embedding(vocab_size, hidden_dim)
         self.position_embedding = nn.Embedding(max_seq_len, hidden_dim)
@@ -299,8 +300,8 @@ class DynamicKMoETransformer(nn.Module):
         print(f"Reached line {get_current_line_number()}")
         batch_size, seq_len = input_ids.shape
         
-        # Create position indices
-        positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+        # Use precomputed position indices
+        positions = self.position_ids[:, :seq_len]
         print(f"Reached line {get_current_line_number()}")
         
         # Embeddings
