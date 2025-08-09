@@ -105,7 +105,7 @@ class ModelBenchmark:
     def compute_perplexity_on_wikitext(self, num_samples=1000, max_length=512):
         print("Loading WikiText-103...")
         dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
-        texts = [t for t in dataset["test"]["text"] if len(t.strip()) > 0][:num_samples]
+        texts = [t for t in dataset["test"]["text"] if len(t.strip()) > 0][:]
 
         total_loss = 0.0
         total_tokens = 0
