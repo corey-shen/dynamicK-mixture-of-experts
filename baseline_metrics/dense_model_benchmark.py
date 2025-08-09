@@ -1,29 +1,10 @@
-
-'''
-NOTE: this is a gated model, login with a HF token with gated access permission
-Utilizing Llama-3.2-1B for local testing
-https://huggingface.co/meta-llama/Llama-3.2-1B
-
-
-TODO: The following are a list of immediate todos, the doc should contain 
-ALL baseline metrics required (there is a chart for tracking implementation of metrics on page 10 of "Research Proposal")
-
-- Implement time_cpu_inference() and time_cuda_inference() method  
-- Test CUDA timing accuracy
-- Consider adding warmup runs to reduce overhead
-- Add error handling for model loading
-- Fix attention masking bug (currently does not affect the model running)
-- Implement all other baseline metrics (FLOPS/sec, throughout, capacity, etc.)
-'''
-
-from transformers import pipeline
-import torch, time
-from torchvision import models
-from torchsummary import summary
 from transformers import AutoTokenizer, AutoModelForCausalLM
+import torch, time, json, os, psutil, math
+from datasets import load_dataset
+from torchsummary import summary
+import matplotlib.pyplot as plt
 
-def get_device():   
-    # Determine the best available device for inference
+def get_device():
     if torch.cuda.is_available():
         device = torch.device('cuda')
         print("Using CUDA acceleration")
@@ -35,11 +16,15 @@ def get_device():
         print("Using CPU")
     return device
 
-# Initialize model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
-model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
+try:
+    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
+    model = AutoModelForCausalLM.from_pretrained("meta-llama/Llama-3.2-1B")
+except Exception as e:
+    print(f"Error loading model or tokenizer: {e}")
+    exit()
+
 device = get_device()
-model = model.to(device)    # Move model to device
+model = model.to(device)
 model_name = model.config.name_or_path
 
 class ModelBenchmark:
@@ -49,92 +34,137 @@ class ModelBenchmark:
         self.device = device
         self.model_name = model_name
         self.compute_time = 0.0
-        self.tokens_per_second = 0.0
+        self.tokens_per_second_val = 0.0
+        self.throughput_val = 0.0
+        self.utilization_val = 0.0
+        self.perplexity_score = None
 
-        ''' TODO Fix the following error:
-        "The attention mask is not set and cannot be inferred from input because pad token is same as eos token. 
-        As a consequence, you may observe unexpected behavior. 
-        Please pass your input's `attention_mask` to obtain reliable results."
-        '''
         if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token or self.tokenizer.unk_token # Try unk_token
-    
+            self.tokenizer.pad_token = self.tokenizer.eos_token or self.tokenizer.unk_token
+
+    def warmup(self, prompt="Hello", max_new_tokens=5):
+        print("Running warmup to reduce overhead...")
+        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        with torch.no_grad():
+            self.model.generate(**inputs, max_new_tokens=max_new_tokens)
+
     def run_inference(self, prompt, max_new_tokens=500):
-        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids
-        input_ids = input_ids.to(self.device)
-        input_token_count = len(input_ids[0])
+        inputs = self.tokenizer(prompt, return_tensors="pt", padding=True)
+        inputs = inputs.to(self.device)
+        input_token_count = inputs['input_ids'].shape[1]
 
         if self.device.type == 'cuda':
-            self.compute_time = self.time_cuda_inference(input_ids, max_new_tokens)
+            self.compute_time = self.time_cuda_inference(inputs['input_ids'], max_new_tokens)
         else:
-            self.compute_time = self.time_cpu_inference(input_ids, max_new_tokens)
+            self.compute_time = self.time_cpu_inference(inputs['input_ids'], max_new_tokens)
 
         output = self.model.generate(
-                input_ids, max_new_tokens = max_new_tokens, do_sample=True, temperature = 0.7, pad_token_id=tokenizer.eos_token_id
-            )
-        response = tokenizer.decode(output[0], skip_special_tokens=True)
-        
-        output_token_count = len(output[0])
+            inputs['input_ids'],
+            max_new_tokens=max_new_tokens,
+            do_sample=True,
+            temperature=0.7,
+            pad_token_id=self.tokenizer.pad_token_id
+        )
+        response = self.tokenizer.decode(output[0], skip_special_tokens=True)
+
+        output_token_count = output.shape[1]
         new_tokens = output_token_count - input_token_count
-        self.tokens_per_second = new_tokens / self.compute_time if self.compute_time > 0 else 0
-        return response        
-    
-    def tokens_per_second(self, prompt, max_new_tokens=500):
-        return self.tokens_per_second
-    
+        self.tokens_per_second_val = new_tokens / self.compute_time if self.compute_time > 0 else 0
+        self.throughput_val = output_token_count / self.compute_time if self.compute_time > 0 else 0
+        self.utilization_val = self.compute_utilization()
+
+        return response
+
     def time_cuda_inference(self, input_ids, max_new_tokens):
-        '''
-        TODO: implement time inference using CUDA events
-        Should use:
-        - torch.cuda.Event(enable_timing=True) 
-        - start.record() and end.record()
-        - torch.cuda.synchronize()
-        - start.elapsed_time(end) / 1000 to get seconds
-        
-        Return: compute time in seconds
-        '''
-        return 0
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        with torch.no_grad():
+            start.record()
+            self.model.generate(input_ids, max_new_tokens=max_new_tokens)
+            end.record()
+            torch.cuda.synchronize()
+        elapsed_time_ms = start.elapsed_time(end)
+        return elapsed_time_ms / 1000
 
     def time_cpu_inference(self, input_ids, max_new_tokens):
-        '''
-        TODO: Implement time inference using time.perf_counter()
+        start_time = time.perf_counter()
+        with torch.no_grad():
+            self.model.generate(input_ids, max_new_tokens=max_new_tokens)
+        end_time = time.perf_counter()
+        return end_time - start_time
 
-        There is code on the master branch on the repo, should be very similar, although the implementation 
-        was for the pipeline API (ensure it works for .generate() if you intend to copy)
-        
-        Return: compute time in seconds
-        '''
-        return 0
+    def flops_per_second(self):
+        params = sum(p.numel() for p in self.model.parameters())
+        return (params * 2) / self.compute_time if self.compute_time > 0 else 0
 
-    def print_metrics(self):
-        print(f"\n{'='*50}")
-        print(f"BENCHMARK RESULTS")
-        print(f"Model Name: {self.model_name}")
-        print(f"Device: {self.device}")
-        print(f"Compute time: {self.compute_time:.4f} seconds")
-        print(f"Tokens per second: {self.tokens_per_second:.2f}")
+    def compute_utilization(self):
+        total_mem = psutil.virtual_memory().total
+        used_mem = psutil.Process().memory_info().rss
+        return used_mem / total_mem
 
-def main():
-    '''
-    # EXECUTION OVERHEAD. Previously implemented for pipeline API implementation, 
-    # check if running it before running the actual test_prompt reduces overhead. 
-    # If so, run this (check if it needs to be converted to using .generate()) before 
-    # measuring benchmarks for the actual prompt
-    # 
-    # If overhead function DOES indeed reduce overhead, create a function within the 
-    # ModelBenchmark class and call it before measuring any benchmarks
+    def compute_perplexity_on_wikitext(self, num_samples=1000, max_length=512):
+        print("Loading WikiText-103...")
+        dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
+        texts = [t for t in dataset["test"]["text"] if len(t.strip()) > 0][:num_samples]
+        print(f"Length of texts: {len(texts)}")
 
-    small_prompt = "blah"
-    _ = pipe(small_prompt, max_new_tokens=1, do_sample=False)
-    short_execution = generate_response(small_prompt, 1)
-    print(f"Short execution output to absorb python overhead: {short_execution}")
-    '''
-    benchmark = ModelBenchmark(model, tokenizer, device, model_name)
-    test_prompt = "What is machine learning?"
-    print("OUTPUT:")
-    print(benchmark.run_inference(test_prompt))
-    print()
-    benchmark.print_metrics()
+        total_loss = 0.0
+        total_tokens = 0
+        count = 0
 
-if __name__ == "__main__":
-    main()
+        print("Calculating perplexity...")
+        for text in texts:
+            enc = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=max_length)
+            input_ids = enc.input_ids.to(self.device)
+            labels = input_ids.clone()
+
+            with torch.no_grad():
+                outputs = self.model(input_ids, labels=labels)
+                loss = outputs.loss
+                total_loss += loss.item() * input_ids.numel()
+                total_tokens += input_ids.numel()
+            count += 1
+            print(f"Count: {count} Length of text: {len(texts)}")
+
+        avg_loss = total_loss / total_tokens
+        perplexity = math.exp(avg_loss)
+        self.perplexity_score = perplexity
+        print(f"Perplexity on WikiText-103 (subset of {num_samples} samples): {perplexity:.2f}")
+        return perplexity
+
+    def save_metrics_to_json(self):
+        metrics = {
+            "Model Name": self.model_name,
+            "Device": str(self.device),
+            "Compute Time (s)": self.compute_time,
+            "Tokens/sec": self.tokens_per_second_val,
+            "FLOPs/sec": self.flops_per_second(),
+            "Throughput (tokens/s)": self.throughput_val,
+            "Compute Utilization": self.utilization_val,
+            "Memory (MB)": psutil.Process().memory_info().rss / (1024 * 1024),
+            "Perplexity (WikiText-103)": self.perplexity_score if self.perplexity_score is not None else "N/A"
+        }
+        project_root = os.getcwd()
+        storage_dir = os.path.join(project_root, "baseline_benchmark_results")
+        os.makedirs(storage_dir, exist_ok=True)
+        file_path = os.path.join(storage_dir, "benchmark_results.json")
+
+        with open(file_path, "w") as f:
+            json.dump(metrics, f, indent=4)
+
+        print(f"Saved benchmark results to: {file_path}")
+
+# -------- RUNNING BENCHMARK --------
+
+benchmark = ModelBenchmark(model, tokenizer, device, model_name)
+benchmark.warmup()
+
+print("\n=== Generated Text ===")
+prompt = "The history of artificial intelligence dates back to"
+print(benchmark.run_inference(prompt))
+
+# Evaluate perplexity on WikiText-103 (subset)
+benchmark.compute_perplexity_on_wikitext(num_samples=500)
+
+# Save full results
+benchmark.save_metrics_to_json()

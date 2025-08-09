@@ -1,0 +1,11 @@
+{
+    "Model Name": "meta-llama/Llama-3.2-1B",
+    "Device": "mps",
+    "Compute Time (s)": 47.84390387500753,
+    "Tokens/sec": 10.450652214883068,
+    "FLOPs/sec": 51660265.986177556,
+    "Throughput (tokens/s)": 10.638763954750964,
+    "Compute Utilization": 0.0187530517578125,
+    "Memory (MB)": 623.296875,
+    "Perplexity (WikiText-103)": 21.658943546451933
+}
