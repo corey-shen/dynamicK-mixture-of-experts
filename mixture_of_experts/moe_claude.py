@@ -92,38 +92,45 @@ class DynamicKGating(nn.Module):
         
     def forward(self, x, importance = None):
         # Handle both 3D and 4D inputs (for hierarchical MoE)
-        if x.dim() == 3:
-            b, group_size, dim = x.shape
-            x = x.unsqueeze(0)  # Add dummy dimension
-            squeeze_output = True
-        else:
-            *outer_dims, b, group_size, dim = x.shape
-            squeeze_output = False
+        # if x.dim() == 3:
+        #     b, group_size, dim = x.shape
+        #     x = x.unsqueeze(0)  # Add dummy dimension
+        #     squeeze_output = True
+        # else:
+        #     *outer_dims, b, group_size, dim = x.shape
+        #     squeeze_output = False
             
-        num_gates = self.num_gates
+        # num_gates = self.num_gates
         
-        if self.training:
-            capacity_factor = self.capacity_factor_train
-        else:
-            capacity_factor = self.capacity_factor_eval
+        # if self.training:
+        #     capacity_factor = self.capacity_factor_train
+        # else:
+        #     capacity_factor = self.capacity_factor_eval
         
         # Compute gate scores
         raw_gates = torch.einsum('...bnd,...de->...bne', x, self.w_gating)
-        probs = raw_gates.softmax(dim=-1)       # raw_gates is not defined
+        probs = raw_gates.softmax(dim=-1)       
         p_sorted, idx_sorted = torch.sort(probs, -1, descending=True)
-        cumsum = torch.cumsum(p_sorted, dim=-1)
+
+        cumsum = torch.cumsum(p_sorted, dim=-1) # masking | at least 1 experts must be selected
         keep = (cumsum < self.threshold)
         keep[..., 0] = True
-        k_star = keep.sum(dim=-1).clamp(max=self.num_gates)
-        range_e = torch.arange(self.num_gates, device=probs.device)
-        slot_mask = range_e.view(1, 1, -1) < k_star.unsqueeze(-1)
-        sel_idx_sorted = torch.where(slot_mask, idx_sorted, torch.full_like(idx_sorted, -1))
-        sel_p_sorted   = torch.where(slot_mask, p_sorted, 0.0)
-        renorm = sel_p_sorted.sum(dim=-1, keepdim=True).clamp_(min=1e-9)
+
+        k_star = keep.sum(dim=-1).clamp(max=self.num_gates)     # optimal k per token
+
+        range_e = torch.arange(self.num_gates, device=probs.device)     # build mask over optimal k in sorted dimension
+        slot_mask = range_e.view(1, 1, -1) < k_star.unsqueeze(-1)       # slot_mask == 3D tensor of booleans (1/0)
+
+        sel_idx_sorted = torch.where(slot_mask, idx_sorted, torch.full_like(idx_sorted, -1))    # select top k indices and probabilities
+        sel_p_sorted   = torch.where(slot_mask, p_sorted, 0.0)      # pad remaining probabilities with 0.0
+
+        renorm = sel_p_sorted.sum(dim=-1, keepdim=True).clamp_(min=1e-9)    # renormalize top-k probabilities (ones we kept)
         sel_p_sorted = sel_p_sorted / renorm
+
         B, T, E = probs.shape
-        expert_masks = torch.zeros(B, T, E, device=probs.device, dtype=probs.dtype)
-        expert_weights = torch.zeros_like(expert_masks)
+        expert_masks = torch.zeros(B, T, E, device=probs.device, dtype=probs.dtype) # one hot encoding over experts to identify which experts are selected
+        expert_weights = torch.zeros_like(expert_masks) 
+
         valid = sel_idx_sorted != -1
         expert_masks.scatter_add_(
             dim=-1,
@@ -135,33 +142,42 @@ class DynamicKGating(nn.Module):
             index=sel_idx_sorted.clamp(min=0),
             src=sel_p_sorted
         )
-        expert_weights = expert_weights * (expert_masks > 0)
+        expert_weights = expert_weights * (expert_masks > 0)    # Zeroing out weights for experts that were not selected
+
         if self.training:
             capacity_factor = self.capacity_factor_train
         else:
             capacity_factor = self.capacity_factor_eval
+
         expert_capacity = min(
             T,
             math.ceil((T * capacity_factor) / self.num_gates)
         )
         expert_capacity = max(expert_capacity, MIN_EXPERT_CAPACITY)
         C = expert_capacity
-        pos = cumsum_exclusive(expert_masks.transpose(1, 2), dim=-1)
-        pos = pos.transpose(1, 2)
-        keep_cap = (pos < float(C)) & (expert_masks > 0)
+
+        pos = cumsum_exclusive(expert_masks.transpose(1, 2), dim=-1)    # Compute per-expert position s.t. expert position = t
+        pos = pos.transpose(1, 2)   # B.E.T => B.T.E
+
+        keep_cap = (pos < float(C)) & (expert_masks > 0)    # Clamping | mask out any tokens > capacity 
         pos = pos.clamp(max=C-1).long()
-        dispatch = torch.zeros(B, T, E, C, device=probs.device, dtype=probs.dtype)
+
+        dispatch = torch.zeros(B, T, E, C, device=probs.device, dtype=probs.dtype)  
         combine  = torch.zeros_like(dispatch)
-        t_idx = torch.arange(T, device=probs.device).view(1, T, 1).expand(B, T, E)
-        b_idx = torch.arange(B, device=probs.device).view(B, 1, 1).expand(B, T, E)
+
+        t_idx = torch.arange(T, device=probs.device).view(1, T, 1).expand(B, T, E)  # which token gets sent to which expert
+        b_idx = torch.arange(B, device=probs.device).view(B, 1, 1).expand(B, T, E)  # T = seq length, B = batch size, E = number of experts
         e_idx = torch.arange(E, device=probs.device).view(1, 1, E).expand(B, T, E)
-        b_sel = b_idx[keep_cap]
+
+        b_sel = b_idx[keep_cap] # keep_cap == boolean mask for experts that were selected
         t_sel = t_idx[keep_cap]
         e_sel = e_idx[keep_cap]
-        c_sel = pos[keep_cap]
-        dispatch[b_sel, t_sel, e_sel, c_sel] = 1.0
-        combine [b_sel, t_sel, e_sel, c_sel] = expert_weights[keep_cap]
-        density       = expert_masks.mean(dim=1)
+        c_sel = pos[keep_cap]   # Capacity slot C | Capacity index grid | capacity slot within expert
+
+        dispatch[b_sel, t_sel, e_sel, c_sel] = 1.0  # Dispatch tensor | B.T.E.C
+        combine [b_sel, t_sel, e_sel, c_sel] = expert_weights[keep_cap]     # Stores the probabiliites of the experts selected for each token
+
+        density       = expert_masks.mean(dim=1)    # Load balance loss
         density_proxy = probs.mean(dim=1)
         aux_loss = (density * density_proxy).mean() * (self.num_gates ** 2)
         return dispatch, combine, aux_loss
