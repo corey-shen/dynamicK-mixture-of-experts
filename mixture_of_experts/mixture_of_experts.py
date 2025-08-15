@@ -6,6 +6,7 @@ import math
 from inspect import isfunction
 
 # constants
+# NOTE: THIS IS THE ORIGINAL CODE
 
 MIN_EXPERT_CAPACITY = 4
 
