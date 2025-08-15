@@ -91,6 +91,24 @@ class DynamicKGating(nn.Module):
         self.w_gating = nn.Parameter(torch.randn(*outer_expert_dims, dim, num_gates))
         
     def forward(self, x, importance = None):
+        # Handle both 3D and 4D inputs (for hierarchical MoE)
+        if x.dim() == 3:
+            b, group_size, dim = x.shape
+            x = x.unsqueeze(0)  # Add dummy dimension
+            squeeze_output = True
+        else:
+            *outer_dims, b, group_size, dim = x.shape
+            squeeze_output = False
+            
+        num_gates = self.num_gates
+        
+        if self.training:
+            capacity_factor = self.capacity_factor_train
+        else:
+            capacity_factor = self.capacity_factor_eval
+        
+        # Compute gate scores
+        raw_gates = torch.einsum('...bnd,...de->...bne', x, self.w_gating)
         probs = raw_gates.softmax(dim=-1)       # raw_gates is not defined
         p_sorted, idx_sorted = torch.sort(probs, -1, descending=True)
         cumsum = torch.cumsum(p_sorted, dim=-1)
