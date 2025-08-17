@@ -243,7 +243,7 @@ class HierarchicalMoE(nn.Module):
         self.num_experts_outer = num_experts_outer
         self.num_experts_inner = num_experts_inner
         
-        # Dynamic-K gating for both levels
+        # outer gate
         self.gate_outer = DynamicKGating(
             dim, 
             num_gates = num_experts_outer,
@@ -251,10 +251,10 @@ class HierarchicalMoE(nn.Module):
             capacity_factor_train = capacity_factor_train,
             capacity_factor_eval = capacity_factor_eval
         )
+        # inner gate (strict: always [B, T, D], no extra dims)
         self.gate_inner = DynamicKGating(
             dim,
             num_gates = num_experts_inner,
-            outer_expert_dims = (num_experts_outer,),
             threshold = threshold,
             capacity_factor_train = capacity_factor_train,
             capacity_factor_eval = capacity_factor_eval
@@ -264,30 +264,39 @@ class HierarchicalMoE(nn.Module):
         self.loss_coef = loss_coef
 
     def forward(self, inputs, **kwargs):
+        # inputs: [B, T, D]
         b, n, d, eo, ei = *inputs.shape, self.num_experts_outer, self.num_experts_inner
-        dispatch_tensor_outer, combine_tensor_outer, loss_outer = self.gate_outer(inputs)
-        expert_inputs_outer = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_tensor_outer)
 
-        # Compute importance scores for inner routing
-        importance = combine_tensor_outer.permute(2, 0, 3, 1).sum(dim=-1)
-        importance = 0.5 * ((importance > 0.5).float() + (importance > 0.).float())
+        # ---- outer gating ----
+        dispatch_outer, combine_outer, loss_outer = self.gate_outer(inputs)   # combine_outer: [B, T, Eo, C]
+        expert_inputs_outer = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_outer)  # [Eo, B, C, D]
 
-        dispatch_tensor_inner, combine_tensor_inner, loss_inner = self.gate_inner(expert_inputs_outer, importance = importance)
-        expert_inputs = torch.einsum('ebnd,ebnfc->efbcd', expert_inputs_outer, dispatch_tensor_inner)
+        # flatten outer experts into batch
+        expert_inputs_outer = expert_inputs_outer.reshape(eo * b, n, d)       # [(Eo*B), T, D]
 
-        orig_shape = expert_inputs.shape
-        expert_inputs = expert_inputs.reshape(eo, ei, -1, d)
+        # ---- inner gating ----
+        dispatch_inner, combine_inner, loss_inner = self.gate_inner(expert_inputs_outer)   # gating sees 3D only
+        expert_inputs = torch.einsum('bnd,bnec->ebcd', expert_inputs_outer, dispatch_inner)  # [Ei, (Eo*B), C, D]
+
+        # ---- experts ----
+        expert_inputs = expert_inputs.reshape(ei, eo * b * n, d)
         expert_outputs = self.experts(expert_inputs)
-        expert_outputs = expert_outputs.reshape(*orig_shape)
+        expert_outputs = expert_outputs.reshape(ei, eo * b, n, d)
 
-        expert_outputs_outer = torch.einsum('efbcd,ebnfc->ebnd', expert_outputs, combine_tensor_inner)
-        output = torch.einsum('ebcd,bnec->bnd', expert_outputs_outer, combine_tensor_outer)
+        # ---- combine inner ----
+        output_inner = torch.einsum('ebcd,bnec->bnd', expert_outputs, combine_inner)  # [(Eo*B), T, D]
+        output_inner = output_inner.reshape(eo, b, n, d)  # unflatten outer expert dim
+
+        # ---- combine outer ----
+        output = torch.einsum('ebcd,bnec->bnd', output_inner, combine_outer)  # [B, T, D]
+
         return output, (loss_outer + loss_inner) * self.loss_coef
+
 
 # Example usage
 if __name__ == "__main__":
     # Test Dynamic-K MoE
-    batch_size = 2
+    batch_size = 4
     seq_len = 10
     dim = 512
     
