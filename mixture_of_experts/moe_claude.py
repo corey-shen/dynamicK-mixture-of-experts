@@ -265,31 +265,54 @@ class HierarchicalMoE(nn.Module):
 
     def forward(self, inputs, **kwargs):
         # inputs: [B, T, D]
-        b, n, d, eo, ei = *inputs.shape, self.num_experts_outer, self.num_experts_inner
-
-        # ---- outer gating ----
-        dispatch_outer, combine_outer, loss_outer = self.gate_outer(inputs)   # combine_outer: [B, T, Eo, C]
-        expert_inputs_outer = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_outer)  # [Eo, B, C, D]
-
-        # flatten outer experts into batch
-        expert_inputs_outer = expert_inputs_outer.reshape(eo * b, n, d)       # [(Eo*B), T, D]
-
-        # ---- inner gating ----
-        dispatch_inner, combine_inner, loss_inner = self.gate_inner(expert_inputs_outer)   # gating sees 3D only
-        expert_inputs = torch.einsum('bnd,bnec->ebcd', expert_inputs_outer, dispatch_inner)  # [Ei, (Eo*B), C, D]
-
-        # ---- experts ----
-        expert_inputs = expert_inputs.reshape(ei, eo * b * n, d)
-        expert_outputs = self.experts(expert_inputs)
-        expert_outputs = expert_outputs.reshape(ei, eo * b, n, d)
-
-        # ---- combine inner ----
-        output_inner = torch.einsum('ebcd,bnec->bnd', expert_outputs, combine_inner)  # [(Eo*B), T, D]
-        output_inner = output_inner.reshape(eo, b, n, d)  # unflatten outer expert dim
-
-        # ---- combine outer ----
-        output = torch.einsum('ebcd,bnec->bnd', output_inner, combine_outer)  # [B, T, D]
-
+        b, t, d = inputs.shape
+        eo, ei = self.num_experts_outer, self.num_experts_inner
+        # ---- outer gating (strict: gate sees [B, T, D]) ----
+        dispatch_outer, combine_outer, loss_outer = self.gate_outer(inputs)           # [B, T, Eo, Co]
+        # Dispatch tokens to outer experts → [Eo, B, Co, D]
+        expert_inputs_outer = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_outer)
+        # ---- flatten outer experts into batch for inner gate ----
+        # NOTE: Co (outer capacity) may be < T, so respect it (do NOT assume T).
+        _, B_, Co, D_ = expert_inputs_outer.shape
+        assert B_ == b and D_ == d
+        expert_inputs_outer_flat = expert_inputs_outer.reshape(eo * b, Co, d)         # [(Eo*B), Co, D]
+        # ---- inner gating (strict: gate sees [B, T, D]) ----
+        dispatch_inner, combine_inner, loss_inner = self.gate_inner(                  # [(Eo*B), Co, Ei, Ci]
+            expert_inputs_outer_flat
+        )
+        # Send to inner experts → [Ei, (Eo*B), Ci, D]
+        expert_inputs_inner = torch.einsum('bnd,bnec->ebcd',                          # e: Ei, b: (Eo*B), c: Ci
+                                        expert_inputs_outer_flat, dispatch_inner)
+        # ---- arrange for Experts() which has params shaped [Eo, Ei, D, H] ----
+        # Current: [Ei, (Eo*B), Ci, D] → [Eo, Ei, B, Ci, D] → [Eo, Ei, N, D] with N = B*Ci
+        ei_, eob, Ci, d_ = expert_inputs_inner.shape
+        assert ei_ == ei and d_ == d and eob % eo == 0
+        B = eob // eo
+        expert_inputs_for_experts = (
+            expert_inputs_inner
+                .reshape(ei, eo, B, Ci, d)        # [Ei, Eo, B, Ci, D]
+                .permute(1, 0, 2, 3, 4)           # [Eo, Ei, B, Ci, D]
+                .reshape(eo, ei, B * Ci, d)       # [Eo, Ei, N, D]  (N = B*Ci)
+        )
+        # ---- run experts ----
+        expert_outputs = self.experts(expert_inputs_for_experts)                      # [Eo, Ei, N, D]
+        expert_outputs = expert_outputs.reshape(eo, ei, B, Ci, d)                     # [Eo, Ei, B, Ci, D]
+        # ---- combine inner experts back using combine_inner ----
+        # Convert to [Ei, (Eo*B), Ci, D] to align with combine_inner: [(Eo*B), Co, Ei, Ci]
+        expert_outputs_for_inner = (
+            expert_outputs
+                .permute(1, 0, 2, 3, 4)            # [Ei, Eo, B, Ci, D]
+                .reshape(ei, eo * B, Ci, d)        # [Ei, (Eo*B), Ci, D]
+        )
+        # Combine along inner: result [(Eo*B), Co, D]
+        output_inner_flat = torch.einsum('ebcd,bnec->bnd',
+                                        expert_outputs_for_inner,
+                                        combine_inner)
+        # Unflatten outer expert dimension → [Eo, B, Co, D]
+        output_inner = output_inner_flat.reshape(eo, B, Co, d)
+        # ---- combine outer experts back to tokens ----
+        # combine_outer: [B, T, Eo, Co]
+        output = torch.einsum('ebcd,bnec->bnd', output_inner, combine_outer)          # [B, T, D]
         return output, (loss_outer + loss_inner) * self.loss_coef
 
 
