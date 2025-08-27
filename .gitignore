@@ -131,6 +131,7 @@ dmypy.json
 #MacOS
 *.DS_Store
 
+baseline_metrics/baseline_benchmark_results/
 # Wikitext-103
 /dataset/Mixture_of_experts/
 
