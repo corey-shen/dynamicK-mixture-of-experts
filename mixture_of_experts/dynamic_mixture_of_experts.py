@@ -9,9 +9,7 @@ from transformers import GPT2Tokenizer
 import numpy as np
 from tqdm import tqdm
 import glob
-import random
 
-# ============ MoE code ============
 MIN_EXPERT_CAPACITY = 4
 
 def default(val, default_val):
@@ -321,17 +319,17 @@ def main():
     config = {
         'data_path': '1-billion-word-language-modeling-benchmark',
         'batch_size': 8,
-        'learning_rate': 1e-4,
+        'learning_rate': 1e-3,
         'num_epochs': 10,
         'max_seq_len': 64,
         'vocab_size': 50257,
         'dim': 256,
-        'num_layers': 8,
-        'num_experts': 16,
+        'num_layers': 2,
+        'num_experts': 4,
         'num_heads': 4,
         'threshold': 0.8,
-        'max_train_samples': 5000,
-        'max_valid_samples': 1000,
+        'max_train_samples': 100000,
+        'max_test_samples': 100000,
         'device': 'cuda' if torch.cuda.is_available() else 'cpu'
     }
     
@@ -350,9 +348,12 @@ def main():
     train_dataset = OneBillionWordDataset(config['data_path'], tokenizer,
                                          max_length=config['max_seq_len'],
                                          split='train', max_samples=config['max_train_samples'])
+    num_samples = len(train_dataset)
+    print(f"Number of training samples: {num_samples}")
+
     valid_dataset = OneBillionWordDataset(config['data_path'], tokenizer,
                                          max_length=config['max_seq_len'],
-                                         split='valid', max_samples=config['max_valid_samples'])
+                                         split='valid', max_samples=config['max_test_samples'])
     
     train_loader = DataLoader(train_dataset, batch_size=config['batch_size'],
                             shuffle=True, num_workers=0, pin_memory=False)
@@ -383,9 +384,9 @@ def main():
         print(f"  Aux Loss: {train_aux_loss:.6f}")
         
         print(f"\nEvaluating epoch {epoch}...")
-        val_perplexity, val_loss = calculate_perplexity(model, valid_loader, config['device'])
-        print(f"  Validation Loss: {val_loss:.4f}")
-        print(f"  Validation Perplexity: {val_perplexity:.2f}")
+        test_perplexity, test_loss = calculate_perplexity(model, valid_loader, config['device'])
+        print(f"  Testing Loss: {test_loss:.4f}")
+        print(f"  Testing Perplexity: {test_perplexity:.2f}")
     
     print("\n" + "="*50)
     print("Training completed!")
@@ -393,8 +394,8 @@ def main():
     
     print("\nFinal evaluation...")
     final_perplexity, final_loss = calculate_perplexity(model, valid_loader, config['device'])
-    print(f"Final Validation Loss: {final_loss:.4f}")
-    print(f"Final Validation Perplexity: {final_perplexity:.2f}")
+    print(f"Final Testing Loss: {final_loss:.4f}")
+    print(f"Final Testing Perplexity: {final_perplexity:.2f}")
 
 if __name__ == "__main__":
     main()
