@@ -299,23 +299,19 @@ class HeirarchicalMoE(nn.Module):
         dispatch_tensor_outer, combine_tensor_outer, loss_outer = self.gate_outer(inputs)
         expert_inputs_outer = torch.einsum('bnd,bnec->ebcd', inputs, dispatch_tensor_outer)
 
-        # we construct an "importance" Tensor for the inputs to the second-level
-        # gating.  The importance of an input is 1.0 if it represents the
-        # first-choice expert-group and 0.5 if it represents the second-choice expert
-        # group.  This is used by the second-level gating.
         importance = combine_tensor_outer.permute(2, 0, 3, 1).sum(dim=-1)
         importance = 0.5 * ((importance > 0.5).float() + (importance > 0.).float())
 
         dispatch_tensor_inner, combine_tensor_inner, loss_inner = self.gate_inner(expert_inputs_outer, importance = importance)
         expert_inputs = torch.einsum('ebnd,ebnfc->efbcd', expert_inputs_outer, dispatch_tensor_inner)
 
-        # Now feed the expert inputs through the experts.
+        # Feed the expert inputs through the experts
         orig_shape = expert_inputs.shape
         expert_inputs = expert_inputs.reshape(eo, ei, -1, d)
         expert_outputs = self.experts(expert_inputs)
         expert_outputs = expert_outputs.reshape(*orig_shape)
 
-        # NOW COMBINE EXPERT OUTPUTS (reversing everything we have done)
+        # Combine expert outputs
         # expert_output has shape [y0, x1, h, d, n]
 
         expert_outputs_outer = torch.einsum('efbcd,ebnfc->ebnd', expert_outputs, combine_tensor_inner)

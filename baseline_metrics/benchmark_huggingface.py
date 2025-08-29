@@ -25,7 +25,7 @@ def run_benchmark(model_name, prompt, num_runs=5, max_new_tokens=100, device="cu
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
     input_token_count = inputs.input_ids.shape[1]
     
-    print("Warming up...")
+    print("Warming up.")
     with torch.no_grad():
         _ = model.generate(**inputs, max_new_tokens=max_new_tokens)
     
@@ -101,7 +101,7 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
     
-    # Test prompt [change]
+    # Test prompt [change as needed]
     prompt = "Explain the concept of Mixture of Experts in neural networks and how it helps with efficiency."
     
     # Run benchmark on Qwen MoE model

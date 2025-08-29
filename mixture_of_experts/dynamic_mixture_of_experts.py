@@ -76,15 +76,18 @@ class DynamicKGating(nn.Module):
         keep = (cumsum < self.threshold)
         keep[..., 0] = True
         k_star = keep.sum(dim=-1).clamp(max=self.num_gates)
+
         range_e = torch.arange(self.num_gates, device=probs.device)
         slot_mask = range_e.view(1, 1, -1) < k_star.unsqueeze(-1)
         sel_idx_sorted = torch.where(slot_mask, idx_sorted, torch.full_like(idx_sorted, -1))
         sel_p_sorted = torch.where(slot_mask, p_sorted, 0.0)
+
         renorm = sel_p_sorted.sum(dim=-1, keepdim=True).clamp_(min=1e-9)
         sel_p_sorted = sel_p_sorted / renorm
         B, T, E = probs.shape
         expert_masks = torch.zeros(B, T, E, device=probs.device, dtype=probs.dtype)
         expert_weights = torch.zeros_like(expert_masks)
+
         valid = sel_idx_sorted != -1
         expert_masks.scatter_add_(dim=-1, index=sel_idx_sorted.clamp(min=0), src=valid.to(probs.dtype))
         expert_weights.scatter_add_(dim=-1, index=sel_idx_sorted.clamp(min=0), src=sel_p_sorted)
@@ -92,25 +95,31 @@ class DynamicKGating(nn.Module):
         capacity_factor = self.capacity_factor_train if self.training else self.capacity_factor_eval
         expert_capacity = min(T, math.ceil((T * capacity_factor) / self.num_gates))
         expert_capacity = max(expert_capacity, MIN_EXPERT_CAPACITY)
+
         C = expert_capacity
         pos = cumsum_exclusive(expert_masks.transpose(1, 2), dim=-1)
         pos = pos.transpose(1, 2)
         keep_cap = (pos < float(C)) & (expert_masks > 0)
         pos = pos.clamp(max=C-1).long()
+
         dispatch = torch.zeros(B, T, E, C, device=probs.device, dtype=probs.dtype)  
         combine = torch.zeros_like(dispatch)
+        
         t_idx = torch.arange(T, device=probs.device).view(1, T, 1).expand(B, T, E)
         b_idx = torch.arange(B, device=probs.device).view(B, 1, 1).expand(B, T, E)
         e_idx = torch.arange(E, device=probs.device).view(1, 1, E).expand(B, T, E)
+
         b_sel = b_idx[keep_cap]
         t_sel = t_idx[keep_cap]
         e_sel = e_idx[keep_cap]
         c_sel = pos[keep_cap]
+
         dispatch[b_sel, t_sel, e_sel, c_sel] = 1.0
         combine[b_sel, t_sel, e_sel, c_sel] = expert_weights[keep_cap]
         density = expert_masks.mean(dim=1)
         density_proxy = probs.mean(dim=1)
         aux_loss = (density * density_proxy).mean() * (self.num_gates ** 2)
+
         return dispatch, combine, aux_loss
 
 class MoE(nn.Module):
@@ -226,6 +235,7 @@ class MoELanguageModel(nn.Module):
         self.token_embedding = nn.Embedding(vocab_size, dim)
         self.position_embedding = nn.Embedding(max_seq_len, dim)
         self.layers = nn.ModuleList()
+
         for _ in range(num_layers):
             layer = nn.ModuleDict({
                 'attention': nn.MultiheadAttention(dim, num_heads, batch_first=True),
@@ -253,6 +263,7 @@ class MoELanguageModel(nn.Module):
         x = token_emb + pos_emb
         causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=device) * float('-inf'), diagonal=1)
         total_aux_loss = 0
+
         for layer in self.layers:
             attn_out, _ = layer['attention'](x, x, x, attn_mask=causal_mask, key_padding_mask=attention_mask)
             x = layer['norm1'](x + attn_out)
@@ -266,6 +277,7 @@ def calculate_perplexity(model, dataloader, device):
     model.eval()
     total_loss = 0
     total_tokens = 0
+
     with torch.no_grad():
         for batch_idx, (input_ids, targets) in enumerate(tqdm(dataloader, desc="Calculating perplexity")):
             input_ids = input_ids.to(device)
@@ -289,6 +301,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
     total_aux_loss = 0
     total_tokens = 0
     progress_bar = tqdm(dataloader, desc=f"Training Epoch {epoch}")
+
     for batch_idx, (input_ids, targets) in enumerate(progress_bar):
         input_ids = input_ids.to(device)
         targets = targets.to(device)
@@ -312,6 +325,7 @@ def train_epoch(model, dataloader, optimizer, device, epoch):
             progress_bar.set_postfix({'loss': f'{avg_loss:.4f}', 'aux_loss': f'{avg_aux:.6f}', 'ppl': f'{current_ppl:.2f}'})
         if batch_idx >= 100:
             break
+
     avg_loss = total_loss / max(total_tokens, 1)
     return avg_loss, total_aux_loss / max(total_tokens, 1)
 

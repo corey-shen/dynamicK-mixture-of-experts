@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import math
 from inspect import isfunction
 
-# NOTE: THIS IS THE ORIGINAL CODE
+# NOTE: THIS IS THE ORIGINAL CODE (unchanged)
 
 MIN_EXPERT_CAPACITY = 4
 

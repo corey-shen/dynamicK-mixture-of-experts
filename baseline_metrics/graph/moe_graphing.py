@@ -2,8 +2,6 @@ import json
 import csv
 import matplotlib.pyplot as plt
 
-# --- Conversion and Utility Functions ---
-
 def preprocess_results(results):
     results["tokens_per_millisecond"] = results["tokens_per_second"] / 1000
     results["avg_memory"] = results["avg_memory"] * 1024     # GB → MB
@@ -49,8 +47,7 @@ def plot_benchmarks(results, metrics, labels, output_prefix="benchmark_compariso
     plt.savefig(f"{output_prefix}.pdf", dpi=300)
     plt.show()
 
-# --- Manual MoE vs Standard Results (Optional Part) ---
-# Only include this section if you have these results from benchmarking code in memory
+# --- Manual MoE vs Standard Results ---
 try:
     moe_results = preprocess_results(moe_results)
     standard_results = preprocess_results(standard_results)
@@ -58,20 +55,19 @@ try:
 except NameError:
     manual_results = []
 
-# --- Load JSON benchmark results (e.g., from benchmark_results.json) ---
+# Load JSON benchmark results
 input_file = "benchmark_results.json"
 json_results = load_benchmark_data(input_file)
 
-# --- Merge both sources if available ---
 all_results = manual_results + json_results
 
-# --- CSV and Plot Configuration ---
+# CSV and Plot Configuration
 csv_output_file = "benchmark_results_combined.csv"
 plot_prefix = "benchmark_comparison_combined"
 metrics = ["tokens_per_millisecond", "avg_memory", "avg_time", "latency", "accuracy", "efficiency"]
 labels = ["Tokens/ms", "Memory (MB)", "Time (ms)", "Latency (ms)", "Accuracy (%)", "Efficiency"]
 
-# --- Output Results ---
+# Output Results
 save_to_csv(all_results, csv_output_file, metrics, labels)
 plot_benchmarks(all_results, metrics, labels, plot_prefix)
 
