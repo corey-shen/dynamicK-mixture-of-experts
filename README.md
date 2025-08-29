@@ -1,134 +1,144 @@
-<img src="./moe.png" width="600px"></img>
+# Dynamic-k Expert Selection for Mixture of Experts
 
-## Sparsely Gated Mixture of Experts - Pytorch
+This repository contains the implementation of **Dynamic-k Expert Selection**, a confidence-aware routing mechanism for Mixture of Experts (MoE) architectures. Unlike static top-k routing, our method dynamically adjusts the number of experts assigned to each token based on router confidence, improving efficiency, reducing wasted computation, and mitigating load imbalance.
 
-A Pytorch implementation of Sparsely Gated <a href="https://arxiv.org/abs/2006.16668">Mixture of Experts</a>, for massively increasing the capacity (parameter count) of a language model while keeping the computation constant.
+This codebase was developed as part of our NeurIPS 2025 workshop submission: *Dynamic k-Expert Selection for Mixture of Expert Architectures*.
 
-It will mostly be a line-by-line transcription of the tensorflow implementation <a href="https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/models/research/moe.py">here</a>, with a few enhancements.
+## Key Idea
+- **Traditional MoEs**: Use a fixed top-k routing strategy (e.g., top-2 experts per token).  
+- **Problem**:  
+  - Confident tokens are routed to unnecessary extra experts (**wasted compute**).  
+  - Ambiguous tokens are limited by fixed-k (**underutilization**).  
+- **Our Approach**: Introduce a **confidence threshold `τ`** over softmax probabilities. For each token:
+  - Route to the minimal number of experts `k*` such that cumulative probability ≥ `τ`.  
+  - Confident tokens → fewer experts.  
+  - Ambiguous tokens → more experts.  
 
-Update: You should now use <a href="https://github.com/lucidrains/st-moe-pytorch">ST Mixture of Experts</a>
+This guarantees a **unique minimal k** and balances efficiency with accuracy.
 
-[![PyPI version](https://badge.fury.io/py/mixture-of-experts.svg)](https://badge.fury.io/py/mixture-of-experts)
+## Features
+- **Dynamic-k Gating**: Adaptive expert selection via cumulative probability thresholds.  
+- **Custom MoE Layer**: Implements dispatch/combine tensors with auxiliary load-balancing loss.  
+- **Language Model Integration**: Lightweight GPT-style transformer backbone with MoE layers.  
+- **Dataset Loader**: Supports the [One Billion Word Benchmark](https://arxiv.org/abs/1312.3005), with fallback to dummy data.  
+- **Evaluation Metrics**: Perplexity and auxiliary load-balancing loss.  
+- **Configurable Thresholds**: We use `τ ∈ {0.5, 0.65, 0.8, 0.95}` to analyze trade-offs.  
 
-## Install
 
-```bash
-$ pip install mixture_of_experts
-```
+## 📊 Results (Perplexity Overview)
+
+| Threshold (τ) | Avg. Perplexity (last 50 epochs) | 95% CI           |
+|---------------|----------------------------------|------------------|
+| 0.50          | 241.91                           | [239.99, 240.33] |
+| 0.65          | 239.95                           | [238.76, 239.11] |
+| 0.80          | 239.76                           | [238.26, 238.77] |
+| 0.95          | **235.94**                       | [233.39, 234.52] |
+
+- Higher thresholds (e.g., `τ = 0.95`) yield the best perplexity.  
+- Extremely low or intermediate thresholds underperform.  
+- Dynamic routing reduces wasted allocation while preserving accuracy.  
+
+## Requirements
+
+- Python ≥ 3.9
+- PyTorch ≥ 2.0
+- HuggingFace Transformers
+- NumPy, tqdm
+
+## Dataset
+
+This project uses the **One Billion Word Benchmark**.
+
+**Download and extract:**
+
+~~~bash
+wget http://www.statmt.org/lm-benchmark/1-billion-word-language-modeling-benchmark-r13output.tar.gz
+tar -xvzf 1-billion-word-language-modeling-benchmark-r13output.tar.gz
+~~~
+
+**Place it at:**
+
+~~~text
+dynamicK-mixture-of-experts/1-billion-word-language-modeling-benchmark/
+~~~
+
+If `data_path` is missing, the loader automatically generates dummy data for a quick demo (smaller scale, not for final results).
 
 ## Usage
 
-```python
-import torch
-from torch import nn
-from mixture_of_experts import MoE
+Run training and evaluation:
 
-moe = MoE(
-    dim = 512,
-    num_experts = 16,               # increase the experts (# parameters) of your model without increasing computation
-    hidden_dim = 512 * 4,           # size of hidden dimension in each expert, defaults to 4 * dimension
-    activation = nn.LeakyReLU,      # use your preferred activation, will default to GELU
-    second_policy_train = 'random', # in top_2 gating, policy for whether to use a second-place expert
-    second_policy_eval = 'random',  # all (always) | none (never) | threshold (if gate value > the given threshold) | random (if gate value > threshold * random_uniform(0, 1))
-    second_threshold_train = 0.2,
-    second_threshold_eval = 0.2,
-    capacity_factor_train = 1.25,   # experts have fixed capacity per batch. we need some extra capacity in case gating is not perfectly balanced.
-    capacity_factor_eval = 2.,      # capacity_factor_* should be set to a value >=1
-    loss_coef = 1e-2                # multiplier on the auxiliary expert balancing auxiliary loss
-)
+~~~bash
+python main.py
+~~~
 
-inputs = torch.randn(4, 1024, 512)
-out, aux_loss = moe(inputs) # (4, 1024, 512), (1,)
-```
+**Configuration (inside `main()`):**
 
-The above should suffice for a single machine, but if you want a heirarchical mixture of experts (2 levels), as used in the GShard paper, please follow the instructions below
-
-```python
-import torch
-from mixture_of_experts import HeirarchicalMoE
-
-moe = HeirarchicalMoE(
-    dim = 512,
-    num_experts = (4, 4),       # 4 gates on the first layer, then 4 experts on the second, equaling 16 experts
-)
-
-inputs = torch.randn(4, 1024, 512)
-out, aux_loss = moe(inputs) # (4, 1024, 512), (1,)
-```
-
-1 billion parameters
-
-```python
-import torch
-from mixture_of_experts import HeirarchicalMoE
-
-moe = HeirarchicalMoE(
-    dim = 512,
-    num_experts = (22, 22)
-).cuda()
-
-inputs = torch.randn(1, 1024, 512).cuda()
-out, aux_loss = moe(inputs)
-
-total_params = sum(p.numel() for p in moe.parameters())
-print(f'number of parameters - {total_params}')
-```
-
-If you want some more sophisticated network for the experts, you can define your own and pass it into the `MoE` class as `experts`
-
-```python
-import torch
-from torch import nn
-from mixture_of_experts import MoE
-
-# a 3 layered MLP as the experts
-
-class Experts(nn.Module):
-    def __init__(self, dim, num_experts = 16):
-        super().__init__()
-        self.w1 = nn.Parameter(torch.randn(num_experts, dim, dim * 4))
-        self.w2 = nn.Parameter(torch.randn(num_experts, dim * 4, dim * 4))
-        self.w3 = nn.Parameter(torch.randn(num_experts, dim * 4, dim))
-        self.act = nn.LeakyReLU(inplace = True)
-
-    def forward(self, x):
-        hidden1 = self.act(torch.einsum('end,edh->enh', x, self.w1))
-        hidden2 = self.act(torch.einsum('end,edh->enh', hidden1, self.w2))
-        out = torch.einsum('end,edh->enh', hidden2, self.w3)
-        return out
-
-experts = Experts(512, num_experts = 16)
-
-moe = MoE(
-    dim = 512,
-    num_experts = 16,
-    experts = experts
-)
-
-inputs = torch.randn(4, 1024, 512)
-out, aux_loss = moe(inputs) # (4, 1024, 512), (1,)
-```
-
-## Citation
-
-```bibtex
-@misc{shazeer2017outrageously,
-    title   = {Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer},
-    author  = {Noam Shazeer and Azalia Mirhoseini and Krzysztof Maziarz and Andy Davis and Quoc Le and Geoffrey Hinton and Jeff Dean},
-    year    = {2017},
-    eprint  = {1701.06538},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.LG}
+~~~python
+config = {
+    'data_path': '1-billion-word-language-modeling-benchmark',
+    'batch_size': 8,
+    'learning_rate': 1e-3,
+    'num_epochs': 10,
+    'max_seq_len': 64,
+    'vocab_size': 50257,
+    'dim': 256,
+    'num_layers': 2,
+    'num_experts': 4,
+    'num_heads': 4,
+    'threshold': 0.8,
+    'max_train_samples': 100000,
+    'max_test_samples': 100000,
+    'device': 'cuda' if torch.cuda.is_available() else 'cpu'
 }
-```
+~~~
 
-```bibtex
-@misc{lepikhin2020gshard,
-    title   = {GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding},
-    author  = {Dmitry Lepikhin and HyoukJoong Lee and Yuanzhong Xu and Dehao Chen and Orhan Firat and Yanping Huang and Maxim Krikun and Noam Shazeer and Zhifeng Chen},
-    year    = {2020},
-    eprint  = {2006.16668},
-    archivePrefix = {arXiv},
-    primaryClass = {cs.CL}
-}
-```
+- Tune `threshold` to control sparsity/expert utilization.
+- `tokenizer.pad_token` is set to the GPT-2 `eos_token` for padding.
+- For quick tests, reduce `max_train_samples` / `max_test_samples`.
+
+## What the Script Prints
+
+- **Per-epoch:** train loss, train perplexity, auxiliary loss
+- **Per-epoch eval:** test loss and test perplexity
+- **Final:** overall test loss and perplexity
+
+**Example:**
+
+~~~text
+Epoch 1 Summary:
+  Train Loss: 5.8921
+  Train Perplexity: 362.14
+  Aux Loss: 0.000012
+
+Evaluating epoch 1...
+  Testing Loss: 5.7110
+  Testing Perplexity: 302.15
+~~~
+
+##  Components Overview
+
+- **Experts:** batched feed-forward experts with GELU activation
+- **DynamicKGating:** computes softmax over experts, sorts, cumulative sum vs. τ, builds dispatch and combine tensors with capacity control and aux loss
+- **MoE:** wraps gating + experts; returns `(output, aux_loss)`
+- **MoELanguageModel:** GPT-style transformer with attention → MoE → residual/LayerNorm
+- **OneBillionWordDataset:** loads OBW files or generates dummy samples; produces `(input_ids, targets)` pairs
+- **Training loop:** `train_epoch`, `calculate_perplexity`, gradient clipping, AdamW, early batch limits for fast iteration
+
+
+
+## Tips & Troubleshooting
+
+- **“Data path does not exist”:** Ensure the dataset folder is exactly `1-billion-word-language-modeling-benchmark/` at the repo root, or change `config['data_path']`.
+- **CPU is slow:** Use a CUDA-enabled GPU if available (`'cuda' if torch.cuda.is_available()`).
+- **OOM:** Reduce `batch_size`, `max_seq_len`, or `dim`. You can also lower `num_layers` / `num_experts`.
+- **Imbalanced experts:** Increase auxiliary loss weight (`loss_coef` in MoE) or tune capacity factors.
+
+## Limitations
+
+- Routing computes scores for all experts, which can add latency in very large MoEs.
+- Threshold τ still needs tuning (though results are generally robust).
+- Dynamic routing can cause temporary compute/memory spikes.
+- **Future work:** lighter routing, adaptive thresholds, and multimodal extensions.
+
+
